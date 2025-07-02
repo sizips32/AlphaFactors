@@ -125,8 +125,15 @@ class AlphaForgeApp:
         # 1. 데이터 준비 섹션
         self._render_data_section()
         
-        # 2. 딥러닝 팩터 마이닝 섹션
-        self._render_model_section()
+        st.header("2. 🎯 알파 팩터 생성")
+        
+        tab1, tab2 = st.tabs(["📊 통계/기술적 팩터", "🧠 딥러닝 팩터"])
+        
+        with tab1:
+            self._render_statistical_factor_section()
+            
+        with tab2:
+            self._render_dl_factor_section()
         
         # 3. Qlib 백테스팅 섹션
         self._render_backtest_section()
@@ -194,6 +201,8 @@ class AlphaForgeApp:
                     st.session_state.universe_data = universe_data
                     st.session_state.volume_data = volume_data
                     st.session_state.tickers_list = tickers_list
+                    st.session_state.start_date = start_date
+                    st.session_state.end_date = end_date
                     st.session_state.universe_loaded = True
                     
                     # 유니버스 정보 표시
@@ -229,9 +238,8 @@ class AlphaForgeApp:
                 import traceback
                 st.code(traceback.format_exc())
     
-    def _render_model_section(self):
+    def _render_statistical_factor_section(self):
         """올바른 알파 팩터 생성 섹션 렌더링"""
-        st.header("2. 🎯 올바른 알파 팩터 생성")
         
         if not st.session_state.get('universe_loaded', False):
             st.warning("먼저 투자 유니버스를 구성하세요.")
@@ -483,8 +491,8 @@ class AlphaForgeApp:
         with col1:
             backtest_method = st.selectbox(
                 "백테스팅 방법",
-                ["딥러닝 기반 백테스팅 (추천)", "Qlib 백테스팅"],
-                help="딥러닝 기반 백테스팅은 더 유연하고 안정적입니다."
+                ["상세 분석 백테스터 (추천)", "Qlib 백테스팅"],
+                help="'상세 분석 백테스터'는 직접 구현한 백테스터로, 상세한 성과 분석과 시각화를 제공합니다. 'Qlib 백테스팅'은 Qlib의 표준 리스크 분석에 유용합니다."
             )
         
         with col2:
@@ -522,17 +530,17 @@ class AlphaForgeApp:
         # 백테스팅 실행
         if st.button("🚀 백테스팅 실행", type="primary"):
             
-            if backtest_method == "딥러닝 기반 백테스팅 (추천)":
-                self._run_deep_learning_backtest(
+            if backtest_method == "상세 분석 백테스터 (추천)":
+                self._run_custom_backtest(
                     strategy_type == "Long Only (매수 전용)",
                     rebalance_freq, transaction_cost, max_position
                 )
             else:
                 self._run_qlib_backtest()
     
-    def _run_deep_learning_backtest(self, long_only: bool, rebalance_freq: str, 
+    def _run_custom_backtest(self, long_only: bool, rebalance_freq: str, 
                                   transaction_cost: float, max_position: float):
-        """딥러닝 기반 백테스팅 실행"""
+        """사용자 정의 상세 분석 백테스팅 실행"""
         
         try:
             universe_data = st.session_state.universe_data
@@ -585,7 +593,7 @@ class AlphaForgeApp:
                     self._export_backtest_results(result)
             
         except Exception as e:
-            st.error(f"딥러닝 백테스팅 실행 중 오류: {e}")
+            st.error(f"상세 분석 백테스팅 실행 중 오류: {e}")
             import traceback
             st.code(traceback.format_exc())
     
@@ -651,7 +659,7 @@ class AlphaForgeApp:
                 
         except Exception as e:
             st.error(f"❌ Qlib 백테스팅 실패: {e}")
-            st.info("💡 딥러닝 기반 백테스팅을 사용해보세요. 더 안정적이고 유연합니다.")
+            st.info("💡 Qlib 백테스팅 대신 상세 분석 백테스터를 사용해보세요. 더 안정적이고 유연합니다.")
     
     def _export_backtest_results(self, result: Dict):
         """백테스팅 결과 내보내기"""
@@ -703,7 +711,7 @@ class AlphaForgeApp:
     def _render_explanation_section(self):
         """설명 섹션 렌더링"""
         with st.expander("💡 코드 설명 및 사용법", expanded=False):
-            st.markdown("""
+            st.markdown(f"""
             ## 🎯 올바른 AlphaForge 시스템
             
             ### ✅ 핵심 개선사항
@@ -739,6 +747,202 @@ class AlphaForgeApp:
             - ✅ 실제 헤지펀드에서 사용하는 정통 방법론
             - ✅ 딥러닝 기반 백테스팅으로 더 유연하고 안정적인 성과 분석
             """)
+
+    def _render_dl_factor_section(self):
+        """딥러닝 기반 알파 팩터 생성 섹션"""
+        st.subheader("🧠 딥러닝 모델 기반 팩터 생성")
+
+        if not st.session_state.get('universe_loaded', False):
+            st.warning("먼저 투자 유니버스를 구성하세요.")
+            return
+
+        st.info("**프로세스:** 유니버스 내 모든 종목의 데이터를 사용하여 MLP 모델을 학습하고, 예측값을 새로운 알파 팩터로 사용합니다.")
+
+        # 모델 파라미터 설정
+        with st.expander("딥러닝 모델 파라미터 설정"):
+            self.config.model.epochs = st.slider("Epochs", 10, 100, self.config.model.epochs, key='dl_epochs')
+            self.config.model.window_size = st.slider("Window Size", 5, 30, self.config.model.window_size, key='dl_window_size')
+            self.config.model.prediction_horizon = st.slider("Prediction Horizon", 1, 10, self.config.model.prediction_horizon, key='dl_prediction_horizon')
+
+        if st.button("🧠 딥러닝 모델 학습 및 팩터 생성", type="primary"):
+            try:
+                tickers = st.session_state.tickers_list
+                start_date = st.session_state.start_date
+                end_date = st.session_state.end_date
+
+                all_X, all_y, all_dates, all_tickers = [], [], [], []
+
+                with st.spinner("학습 데이터 생성 중..."):
+                    for ticker in tickers:
+                        df = self.data_handler.download_data(ticker, pd.Timestamp(start_date), pd.Timestamp(end_date))
+                        if df is not None and len(df) > (self.config.model.window_size + self.config.model.prediction_horizon):
+                            X, y, dates = self.data_handler.create_features_targets(
+                                df, self.config.model.window_size, self.config.model.prediction_horizon
+                            )
+                            all_X.append(X)
+                            all_y.append(y)
+                            all_dates.extend(dates)
+                            all_tickers.extend([ticker] * len(dates))
+
+                    if not all_X:
+                        st.error("학습 데이터를 생성할 수 없습니다.")
+                        return
+
+                    X_train = np.concatenate(all_X)
+                    y_train = np.concatenate(all_y)
+
+                st.success(f"✅ 총 {len(X_train)}개의 학습 데이터 생성 완료")
+
+                # 모델 학습
+                self.model_trainer = ModelTrainer(self.config.model)
+                trained_model = self.model_trainer.train_model(X_train, y_train)
+
+                if trained_model:
+                    st.success("✅ 딥러닝 모델 학습 완료!")
+                    
+                    # 팩터 생성 (예측)
+                    with st.spinner("딥러닝 팩터 생성 중..."):
+                        predictions = self.model_trainer.predict(X_train)
+                        
+                        # 예측값을 DataFrame으로 변환
+                        factor_df = pd.DataFrame({
+                            'datetime': all_dates,
+                            'instrument': all_tickers,
+                            'prediction': predictions
+                        }).pivot(index='datetime', columns='instrument', values='prediction')
+
+                        # 횡단면 순위화
+                        ranked_factor = factor_df.rank(axis=1, pct=True)
+                        
+                        # Qlib 형식으로 변환
+                        qlib_factor = self.alpha_engine.convert_to_qlib_format(ranked_factor)
+
+                        # 세션 상태 업데이트
+                        st.session_state.custom_factor = qlib_factor
+                        st.session_state.combined_factor_df = ranked_factor
+                        st.session_state.individual_factors = {"dl_factor": ranked_factor}
+                        st.session_state.factor_generated = True
+
+                    st.success("✅ 딥러닝 알파 팩터 생성 완료!")
+
+                    # 결과 표시
+                    st.subheader("📈 딥러닝 팩터 분석")
+                    st.metric("데이터 포인트 수", f"{len(qlib_factor):,}")
+                    st.dataframe(ranked_factor.tail(), use_container_width=True)
+
+            except Exception as e:
+                st.error(f"딥러닝 팩터 생성 중 오류: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+
+# 애플리케이션 실행
+if __name__ == "__main__":
+    try:
+        app = AlphaForgeApp()
+        app.run()
+    except Exception as e:
+        st.error(f"애플리케이션 시작 중 오류 발생: {e}")
+        logger.error(f"Application startup error: {e}")
+        import traceback
+        st.code(traceback.format_exc())
+
+    def _render_dl_factor_section(self):
+        """딥러닝 기반 알파 팩터 생성 섹션"""
+        st.subheader("🧠 딥러닝 모델 기반 팩터 생성")
+
+        if not st.session_state.get('universe_loaded', False):
+            st.warning("먼저 투자 유니버스를 구성하세요.")
+            return
+
+        st.info("**프로세스:** 유니버스 내 모든 종목의 데이터를 사용하여 MLP 모델을 학습하고, 예측값을 새로운 알파 팩터로 사용합니다.")
+
+        # 모델 파라미터 설정
+        with st.expander("딥러닝 모델 파라미터 설정"):
+            self.config.model.epochs = st.slider("Epochs", 10, 100, self.config.model.epochs)
+            self.config.model.window_size = st.slider("Window Size", 5, 30, self.config.model.window_size)
+            self.config.model.prediction_horizon = st.slider("Prediction Horizon", 1, 10, self.config.model.prediction_horizon)
+
+        if st.button("🧠 딥러닝 모델 학습 및 팩터 생성", type="primary"):
+            try:
+                tickers = st.session_state.tickers_list
+                start_date = st.session_state.start_date
+                end_date = st.session_state.end_date
+
+                all_X, all_y, all_dates, all_tickers = [], [], [], []
+
+                with st.spinner("학습 데이터 생성 중..."):
+                    for ticker in tickers:
+                        df = self.data_handler.download_data(ticker, pd.Timestamp(start_date), pd.Timestamp(end_date))
+                        if df is not None and len(df) > (self.config.model.window_size + self.config.model.prediction_horizon):
+                            X, y, dates = self.data_handler.create_features_targets(
+                                df, self.config.model.window_size, self.config.model.prediction_horizon
+                            )
+                            all_X.append(X)
+                            all_y.append(y)
+                            all_dates.extend(dates)
+                            all_tickers.extend([ticker] * len(dates))
+
+                    if not all_X:
+                        st.error("학습 데이터를 생성할 수 없습니다.")
+                        return
+
+                    X_train = np.concatenate(all_X)
+                    y_train = np.concatenate(all_y)
+
+                st.success(f"✅ 총 {len(X_train)}개의 학습 데이터 생성 완료")
+
+                # 모델 학습
+                self.model_trainer = ModelTrainer(self.config.model)
+                trained_model = self.model_trainer.train_model(X_train, y_train)
+
+                if trained_model:
+                    st.success("✅ 딥러닝 모델 학습 완료!")
+                    
+                    # 팩터 생성 (예측)
+                    with st.spinner("딥러닝 팩터 생성 중..."):
+                        predictions = self.model_trainer.predict(X_train)
+                        
+                        # 예측값을 DataFrame으로 변환
+                        factor_df = pd.DataFrame({
+                            'datetime': all_dates,
+                            'instrument': all_tickers,
+                            'prediction': predictions
+                        }).pivot(index='datetime', columns='instrument', values='prediction')
+
+                        # 횡단면 순위화
+                        ranked_factor = factor_df.rank(axis=1, pct=True)
+                        
+                        # Qlib 형식으로 변환
+                        qlib_factor = self.alpha_engine.convert_to_qlib_format(ranked_factor)
+
+                        # 세션 상태 업데이트
+                        st.session_state.custom_factor = qlib_factor
+                        st.session_state.combined_factor_df = ranked_factor
+                        st.session_state.individual_factors = {"dl_factor": ranked_factor}
+                        st.session_state.factor_generated = True
+
+                    st.success("✅ 딥러닝 알파 팩터 생성 완료!")
+
+                    # 결과 표시
+                    st.subheader("📈 딥러닝 팩터 분석")
+                    st.metric("데이터 포인트 수", f"{len(qlib_factor):,}")
+                    st.dataframe(ranked_factor.tail(), use_container_width=True)
+
+            except Exception as e:
+                st.error(f"딥러닝 팩터 생성 중 오류: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+
+# 애플리케이션 실행
+if __name__ == "__main__":
+    try:
+        app = AlphaForgeApp()
+        app.run()
+    except Exception as e:
+        st.error(f"애플리케이션 시작 중 오류 발생: {e}")
+        logger.error(f"Application startup error: {e}")
+        import traceback
+        st.code(traceback.format_exc())
 
 # 애플리케이션 실행
 if __name__ == "__main__":

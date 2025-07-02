@@ -12,6 +12,8 @@ warnings.filterwarnings('ignore')
 
 from config import FactorConfig
 
+from config import FactorConfig
+
 class AlphaFactorEngine:
     """올바른 알파 팩터 생성 엔진"""
     

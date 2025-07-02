@@ -63,6 +63,17 @@ class FactorConfig:
     ic_lookback: int = 60
 
 @dataclass
+class FactorConfig:
+    """알파 팩터 생성 관련 설정"""
+    momentum_lookback: int = 20
+    reversal_lookback: int = 5
+    volatility_lookback: int = 20
+    volume_lookback: int = 20
+    rsi_period: int = 14
+    ma_period: int = 50
+    ic_lookback: int = 60
+
+@dataclass
 class AppConfig:
     """전체 애플리케이션 설정"""
     model: ModelConfig = None
