@@ -10,10 +10,13 @@ from typing import Dict, List, Tuple, Optional
 import warnings
 warnings.filterwarnings('ignore')
 
+from config import FactorConfig
+
 class AlphaFactorEngine:
     """올바른 알파 팩터 생성 엔진"""
     
-    def __init__(self):
+    def __init__(self, config: FactorConfig):
+        self.config = config
         self.factors_cache = {}
         self.ic_cache = {}
     
@@ -100,32 +103,32 @@ class AlphaFactorEngine:
         
         try:
             if 'momentum' in factor_types:
-                momentum = self.calculate_momentum_factor(universe_data, lookback=20)
+                momentum = self.calculate_momentum_factor(universe_data, lookback=self.config.momentum_lookback)
                 if not momentum.empty:
                     factors_dict['momentum'] = momentum
                     
             if 'reversal' in factor_types:
-                reversal = self.calculate_reversal_factor(universe_data, lookback=5)
+                reversal = self.calculate_reversal_factor(universe_data, lookback=self.config.reversal_lookback)
                 if not reversal.empty:
                     factors_dict['reversal'] = reversal
                     
             if 'volatility' in factor_types:
-                volatility = self.calculate_volatility_factor(universe_data, lookback=20)
+                volatility = self.calculate_volatility_factor(universe_data, lookback=self.config.volatility_lookback)
                 if not volatility.empty:
                     factors_dict['volatility'] = volatility
                     
             if 'volume' in factor_types and volume_data is not None:
-                volume = self.calculate_volume_factor(universe_data, volume_data, lookback=20)
+                volume = self.calculate_volume_factor(universe_data, volume_data, lookback=self.config.volume_lookback)
                 if not volume.empty:
                     factors_dict['volume'] = volume
                     
             if 'rsi' in factor_types:
-                rsi = self.calculate_rsi_factor(universe_data, period=14)
+                rsi = self.calculate_rsi_factor(universe_data, period=self.config.rsi_period)
                 if not rsi.empty:
                     factors_dict['rsi'] = rsi
                     
             if 'price_to_ma' in factor_types:
-                price_to_ma = self.calculate_price_to_ma_factor(universe_data, ma_period=50)
+                price_to_ma = self.calculate_price_to_ma_factor(universe_data, ma_period=self.config.ma_period)
                 if not price_to_ma.empty:
                     factors_dict['price_to_ma'] = price_to_ma
                     

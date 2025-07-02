@@ -32,7 +32,7 @@ class AlphaForgeApp:
         self.data_handler = DataHandler(self.config.data)
         self.model_trainer = ModelTrainer(self.config.model)
         self.qlib_handler = QlibHandler(self.config.qlib, self.config.data.qlib_data_path)
-        self.alpha_engine = AlphaFactorEngine()
+        self.alpha_engine = AlphaFactorEngine(self.config.factor)
         
         # 한글 폰트 설정 적용
         apply_korean_style()
@@ -275,6 +275,14 @@ class AlphaForgeApp:
         selected_names = [factor_names_ko.get(f, f) for f in factor_types]
         st.info(f"선택된 팩터: {', '.join(selected_names)}")
         
+        st.subheader("⚙️ 팩터 파라미터 설정")
+        with st.expander("파라미터 상세 설정", expanded=False):
+            self.config.factor.momentum_lookback = st.slider("모멘텀 기간", 5, 60, self.config.factor.momentum_lookback)
+            self.config.factor.reversal_lookback = st.slider("반전 기간", 3, 30, self.config.factor.reversal_lookback)
+            self.config.factor.volatility_lookback = st.slider("변동성 기간", 10, 60, self.config.factor.volatility_lookback)
+            self.config.factor.rsi_period = st.slider("RSI 기간", 7, 28, self.config.factor.rsi_period)
+            self.config.factor.ma_period = st.slider("이동평균 기간", 10, 100, self.config.factor.ma_period)
+        
         if st.button("🚀 알파 팩터 생성", type="primary"):
             try:
                 universe_data = st.session_state.universe_data
@@ -438,12 +446,12 @@ class AlphaForgeApp:
             st.markdown(f"""
             ### 📈 팩터별 의미
             
-            **모멘텀 팩터**: 과거 {20}일 수익률이 높은 종목에 높은 점수  
-            **반전 팩터**: 최근 {5}일 하락한 종목에 높은 점수 (단기 반등 기대)  
+            **모멘텀 팩터**: 과거 {self.config.factor.momentum_lookback}일 수익률이 높은 종목에 높은 점수  
+            **반전 팩터**: 최근 {self.config.factor.reversal_lookback}일 하락한 종목에 높은 점수 (단기 반등 기대)  
             **저변동성 팩터**: 변동성이 낮은 안정적인 종목에 높은 점수  
             **거래량 팩터**: 평균 대비 거래량이 급증한 종목에 높은 점수  
             **RSI 팩터**: RSI 과매도 구간(30 이하) 종목에 높은 점수  
-            **이동평균 대비 가격**: 이동평균선 위에 있는 종목에 높은 점수
+            **이동평균 대비 가격**: {self.config.factor.ma_period}일 이동평균선 위에 있는 종목에 높은 점수
             
             ### 🎯 올바른 알파 팩터의 특징
             
