@@ -63,7 +63,7 @@ def clean_data(df: pd.DataFrame, required_columns: List[str]) -> pd.DataFrame:
     df_clean = df.copy()
     
     # 결측값 처리 (forward fill 후 backward fill)
-    df_clean[required_columns] = df_clean[required_columns].fillna(method='ffill').fillna(method='bfill')
+    df_clean[required_columns] = df_clean[required_columns].ffill().bfill()
     
     # 이상값 처리 (각 컬럼별로 99.5% 분위수로 캡핑)
     for col in required_columns:

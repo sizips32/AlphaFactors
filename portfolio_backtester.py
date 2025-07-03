@@ -110,7 +110,7 @@ class PortfolioBacktester:
             if rebalance_freq == 'weekly':
                 # 매주 금요일 또는 마지막 거래일에만 리밸런싱
                 rebalance_dates = weights.index[weights.index.dayofweek == 4]  # 금요일
-                weights = weights.reindex(weights.index).fillna(method='ffill')
+                weights = weights.reindex(weights.index).ffill()
                 for date in weights.index:
                     if date not in rebalance_dates:
                         if date != weights.index[0]:  # 첫날 제외
@@ -118,7 +118,7 @@ class PortfolioBacktester:
             elif rebalance_freq == 'monthly':
                 # 매월 마지막 거래일에만 리밸런싱
                 rebalance_dates = weights.resample('M').last().index
-                weights = weights.reindex(weights.index).fillna(method='ffill')
+                weights = weights.reindex(weights.index).ffill()
                 for date in weights.index:
                     if date not in rebalance_dates:
                         if date != weights.index[0]:

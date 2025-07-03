@@ -222,8 +222,8 @@ class DataHandler:
             volume_df = pd.DataFrame(volume_data)
             
             # 결측값 처리
-            universe_df = universe_df.fillna(method='ffill').fillna(method='bfill')
-            volume_df = volume_df.fillna(method='ffill').fillna(method='bfill')
+            universe_df = universe_df.ffill().bfill()
+            volume_df = volume_df.ffill().bfill()
             
             # 모든 종목이 데이터를 가진 기간만 선택
             min_length = min(len(universe_df), 252)  # 최대 1년
