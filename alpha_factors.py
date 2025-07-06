@@ -12,8 +12,6 @@ warnings.filterwarnings('ignore')
 
 from config import FactorConfig
 
-from config import FactorConfig
-
 class AlphaFactorEngine:
     """올바른 알파 팩터 생성 엔진"""
     
@@ -235,6 +233,38 @@ class AlphaFactorEngine:
         
         return combined_factor, ic_weights
     
+    def combine_factors_fixed_weights(self, factors_dict: Dict[str, pd.DataFrame], weights: Dict[str, float]) -> Tuple[pd.DataFrame, Dict[str, float]]:
+        """
+        팩터별 고정 가중치로 결합하는 함수입니다.
+        - factors_dict: {팩터명: 팩터 DataFrame}
+        - weights: {팩터명: 가중치(float)}
+        반환: (결합된 팩터 DataFrame, 실제 적용된 가중치 dict)
+        """
+        # 가중치 합이 0이 아니면 정규화, 0이면 균등 가중치
+        total_weight = sum(abs(w) for w in weights.values())
+        if total_weight > 0:
+            norm_weights = {k: v / total_weight for k, v in weights.items()}
+        else:
+            n = len(weights)
+            norm_weights = {k: 1/n for k in weights}
+
+        combined_factor = None
+        for factor_name, weight in norm_weights.items():
+            if factor_name in factors_dict and weight != 0:
+                factor_data = factors_dict[factor_name]
+                if combined_factor is None:
+                    combined_factor = factor_data * weight
+                else:
+                    # 인덱스/컬럼 교집합만 결합
+                    common_index = combined_factor.index.intersection(factor_data.index)
+                    common_columns = combined_factor.columns.intersection(factor_data.columns)
+                    if len(common_index) > 0 and len(common_columns) > 0:
+                        combined_factor.loc[common_index, common_columns] += \
+                            factor_data.loc[common_index, common_columns] * weight
+        if combined_factor is None:
+            combined_factor = pd.DataFrame()
+        return combined_factor, norm_weights
+    
     def convert_to_qlib_format(self, factor_df: pd.DataFrame) -> pd.Series:
         """횡단면 팩터를 Qlib MultiIndex 형식으로 변환"""
         
@@ -306,3 +336,55 @@ class AlphaFactorEngine:
             'factor_spread': factor_spread,
             'factor_turnover': factor_turnover
         }
+    
+    def calculate_rolling_ic(self, factor_df: pd.DataFrame, future_returns: pd.DataFrame, window: int = 20) -> dict:
+        """
+        팩터별 rolling IC 및 ICIR(rolling window 기반)을 계산합니다.
+        - factor_df: 팩터 DataFrame (index: 날짜, columns: 종목)
+        - future_returns: 미래 수익률 DataFrame (index: 날짜, columns: 종목)
+        - window: rolling window 크기(일)
+        반환: {'ic': IC 시계열, 'icir': ICIR 시계열}
+        """
+        ic_series = []
+        icir_series = []
+        dates = []
+        ic_buffer = []
+        for i in range(window, len(factor_df) - 1):
+            # 윈도우 내 팩터/수익률 추출
+            factor_window = factor_df.iloc[i-window:i]
+            returns_window = future_returns.iloc[i-window+1:i+1]
+            # 각 날짜별 IC 계산
+            daily_ics = []
+            for j in range(window):
+                try:
+                    f = factor_window.iloc[j]
+                    r = returns_window.iloc[j]
+                    common = f.index.intersection(r.index)
+                    if len(common) < 3:
+                        continue
+                    fvals = f[common].dropna()
+                    rvals = r[common].dropna()
+                    final_common = fvals.index.intersection(rvals.index)
+                    if len(final_common) < 3:
+                        continue
+                    ic = fvals[final_common].corr(rvals[final_common], method='spearman')
+                    if not np.isnan(ic):
+                        daily_ics.append(ic)
+                except Exception:
+                    continue
+            # 윈도우 마지막 날짜 기준
+            dates.append(factor_df.index[i])
+            if daily_ics:
+                mean_ic = np.mean(daily_ics)
+                ic_series.append(mean_ic)
+                ic_buffer.append(mean_ic)
+                # rolling ICIR: 윈도우 내 IC 평균 / 표준편차
+                if len(ic_buffer) >= window:
+                    icir = np.mean(ic_buffer[-window:]) / (np.std(ic_buffer[-window:]) + 1e-8)
+                else:
+                    icir = np.mean(ic_buffer) / (np.std(ic_buffer) + 1e-8)
+                icir_series.append(icir)
+            else:
+                ic_series.append(np.nan)
+                icir_series.append(np.nan)
+        return {'dates': dates, 'ic': ic_series, 'icir': icir_series}

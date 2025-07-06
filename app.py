@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, Dict, List
 
 # 새로운 모듈들 임포트
@@ -16,7 +16,12 @@ from font_config import apply_korean_style
 from utils import (
     show_dataframe_info, 
     display_error_with_suggestions,
-    logger
+    logger,
+    load_factors_from_zoo,
+    delete_factor_from_zoo,
+    save_factor_to_zoo,
+    analyze_factor_performance_text,
+    analyze_backtest_performance_text
 )
 
 st.set_page_config(
@@ -122,13 +127,15 @@ class AlphaForgeApp:
         
         st.header("2. 🎯 알파 팩터 생성")
         
-        tab1, tab2 = st.tabs(["📊 통계/기술적 팩터", "🧠 딥러닝 팩터"])
-        
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 통계/기술적 팩터", "🧠 딥러닝 팩터", "🦁 팩터 Zoo", "⚡ 선형/비선형 비교"])
         with tab1:
             self._render_statistical_factor_section()
-            
         with tab2:
             self._render_dl_factor_section()
+        with tab3:
+            self._render_factor_zoo_section()
+        with tab4:
+            self._render_linear_vs_nonlinear_section()
         
         # 3. Qlib 백테스팅 섹션
         self._render_backtest_section()
@@ -278,83 +285,111 @@ class AlphaForgeApp:
         selected_names = [factor_names_ko.get(f, f) for f in factor_types]
         st.info(f"선택된 팩터: {', '.join(selected_names)}")
         
-        st.subheader("⚙️ 팩터 파라미터 설정")
-        with st.expander("파라미터 상세 설정", expanded=False):
-            self.config.factor.momentum_lookback = st.slider("모멘텀 기간", 5, 60, self.config.factor.momentum_lookback)
-            self.config.factor.reversal_lookback = st.slider("반전 기간", 3, 30, self.config.factor.reversal_lookback)
-            self.config.factor.volatility_lookback = st.slider("변동성 기간", 10, 60, self.config.factor.volatility_lookback)
-            self.config.factor.rsi_period = st.slider("RSI 기간", 7, 28, self.config.factor.rsi_period)
-            self.config.factor.ma_period = st.slider("이동평균 기간", 10, 100, self.config.factor.ma_period)
-        
+        st.subheader("⚖️ 팩터 가중치 방식 선택")
+        weight_mode = st.radio(
+            "팩터 결합 가중치 방식",
+            ["IC 기반 동적 가중치", "고정 가중치 직접 입력"],
+            index=0,
+            help="IC 기반: 각 팩터의 예측력(IC)에 따라 자동 가중치 부여 / 고정: 사용자가 직접 가중치 입력"
+        )
+
+        # 고정 가중치 입력 UI (동적 생성)
+        fixed_weights = {}
+        if weight_mode == "고정 가중치 직접 입력" and len(factor_types) > 1:
+            st.markdown("#### 팩터별 가중치 입력 (합계 0 또는 1이어도 자동 정규화)")
+            cols = st.columns(len(factor_types))
+            for i, factor in enumerate(factor_types):
+                with cols[i]:
+                    fixed_weights[factor] = st.number_input(
+                        f"{factor_names_ko.get(factor, factor)} 가중치", value=1.0, step=0.1, format="%.2f"
+                    )
+
         if st.button("🚀 알파 팩터 생성", type="primary"):
             try:
                 universe_data = st.session_state.universe_data
                 volume_data = st.session_state.get('volume_data')
-                
                 with st.spinner("알파 팩터 계산 중..."):
-                    # 개별 팩터들 계산
+                    # 개별 팩터 계산
                     factors_dict = self.alpha_engine.calculate_all_factors(
                         universe_data, volume_data, factor_types
                     )
-                    
                     if not factors_dict:
                         st.error("팩터 생성에 실패했습니다.")
                         return
-                    
                     st.success(f"✅ {len(factors_dict)}개 팩터 생성 완료")
-                    
                     # 미래 수익률 계산 (1일 후)
                     future_returns = universe_data.pct_change().shift(-1)
-                    
-                    # IC 기반 가중 결합
+
+                    # 팩터 결합 방식 분기
                     if len(factors_dict) > 1:
-                        combined_factor, ic_weights = self.alpha_engine.combine_factors_ic_weighted(
-                            factors_dict, future_returns, ic_lookback
-                        )
-                        
-                        st.info("여러 팩터를 IC 가중 방식으로 결합했습니다.")
-                        
-                        # IC 가중치 표시
-                        st.subheader("⚖️ IC 기반 팩터 가중치")
-                        weights_df = pd.DataFrame.from_dict(
-                            {factor_names_ko.get(k, k): [v] for k, v in ic_weights.items()}, 
-                            orient='index',
-                            columns=['가중치']
-                        )
-                        st.dataframe(weights_df, use_container_width=True)
-                        
+                        if weight_mode == "고정 가중치 직접 입력":
+                            # 고정 가중치 결합
+                            combined_factor, used_weights = self.alpha_engine.combine_factors_fixed_weights(
+                                factors_dict, fixed_weights
+                            )
+                            st.info("사용자 입력 고정 가중치로 팩터를 결합했습니다.")
+                            st.subheader("⚖️ 적용된 팩터별 가중치")
+                            weights_df = pd.DataFrame.from_dict(
+                                {factor_names_ko.get(k, k): [v] for k, v in used_weights.items()},
+                                orient='index', columns=['가중치']
+                            )
+                            st.dataframe(weights_df, use_container_width=True)
+                        else:
+                            # 기존 IC 기반 결합
+                            combined_factor, ic_weights = self.alpha_engine.combine_factors_ic_weighted(
+                                factors_dict, future_returns, ic_lookback
+                            )
+                            st.info("여러 팩터를 IC 가중 방식으로 결합했습니다.")
+                            st.subheader("⚖️ IC 기반 팩터 가중치")
+                            weights_df = pd.DataFrame.from_dict(
+                                {factor_names_ko.get(k, k): [v] for k, v in ic_weights.items()},
+                                orient='index', columns=['가중치']
+                            )
+                            st.dataframe(weights_df, use_container_width=True)
                     else:
                         combined_factor = list(factors_dict.values())[0]
                         ic_weights = {list(factors_dict.keys())[0]: 1.0}
                         st.info("단일 팩터를 사용합니다.")
-                    
+
                     if combined_factor.empty:
                         st.error("결합된 팩터가 비어있습니다.")
                         return
-                    
+
                     # 팩터 성능 분석
                     performance = self.alpha_engine.analyze_factor_performance(
                         combined_factor, future_returns
                     )
-                    
                     # Qlib 형식으로 변환
                     qlib_factor = self.alpha_engine.convert_to_qlib_format(combined_factor)
-                    
                     # 세션 상태 업데이트
                     st.session_state.custom_factor = qlib_factor
                     st.session_state.combined_factor_df = combined_factor
                     st.session_state.individual_factors = factors_dict
                     st.session_state.factor_performance = performance
-                    st.session_state.ic_weights = ic_weights
+                    st.session_state.ic_weights = ic_weights if weight_mode == "IC 기반 동적 가중치" else used_weights
                     st.session_state.factor_generated = True
-                    
                     st.success("✅ 올바른 알파 팩터 생성 완료!")
-                
+                    # --- 팩터 Zoo 자동 저장 ---
+                    # rolling IC/ICIR 계산
+                    rolling_ic = self.alpha_engine.calculate_rolling_ic(combined_factor, future_returns, window=20)
+                    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    factor_label = f"{now_str}_" + "_".join(factor_types) + ("_동적" if weight_mode=="IC 기반 동적 가중치" else "_고정")
+                    meta = {
+                        'factor_name': factor_label,
+                        'created_at': now_str,
+                        'factor_types': factor_types,
+                        'weight_mode': weight_mode,
+                        'weights': ic_weights if weight_mode=="IC 기반 동적 가중치" else used_weights,
+                        'performance': performance,
+                        'params': {k: getattr(self.config.factor, k) for k in dir(self.config.factor) if not k.startswith('__') and not callable(getattr(self.config.factor, k))},
+                        'rolling_ic': rolling_ic
+                    }
+                    save_factor_to_zoo(factor_label, {'meta': meta, 'factor': combined_factor})
+                    st.info(f"[팩터 Zoo]에 자동 저장됨: {factor_label}")
                 # 결과 시각화
                 self._display_factor_analysis(
                     factors_dict, combined_factor, performance, factor_names_ko
                 )
-                    
             except Exception as e:
                 st.error(f"알파 팩터 생성 중 오류: {e}")
                 import traceback
@@ -469,6 +504,60 @@ class AlphaForgeApp:
             - **ICIR**: {performance.get('icir', 0):.4f} ({'우수' if performance.get('icir', 0) > 1 else '양호' if performance.get('icir', 0) > 0.5 else '개선 필요'})
             - **팩터 분산**: {performance.get('factor_spread', 0):.4f} (종목 간 차별화 정도)
             """)
+        
+        # rolling IC/ICIR 시계열 시각화 (조합 팩터)
+        st.subheader("📉 결합 팩터의 Rolling IC/ICIR 시계열")
+        rolling_window = 20  # 기본값, 필요시 UI에서 조정 가능
+        universe_data = st.session_state.universe_data
+        future_returns = universe_data.pct_change().shift(-1)
+        rolling_result = self.alpha_engine.calculate_rolling_ic(combined_factor, future_returns, window=rolling_window)
+        if rolling_result['ic']:
+            fig, ax1 = plt.subplots(figsize=(12, 4))
+            ax1.plot(rolling_result['dates'], rolling_result['ic'], label='Rolling IC', color='tab:blue')
+            ax1.set_ylabel('IC', color='tab:blue')
+            ax1.tick_params(axis='y', labelcolor='tab:blue')
+            ax2 = ax1.twinx()
+            ax2.plot(rolling_result['dates'], rolling_result['icir'], label='Rolling ICIR', color='tab:red', alpha=0.6)
+            ax2.set_ylabel('ICIR', color='tab:red')
+            ax2.tick_params(axis='y', labelcolor='tab:red')
+            ax1.set_title(f'결합 팩터의 {rolling_window}일 Rolling IC/ICIR', fontsize=13)
+            ax1.grid(True, alpha=0.3)
+            fig.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+        # 개별 팩터 rolling IC/ICIR (최대 3개만)
+        if len(factors_dict) > 1:
+            st.subheader("📉 개별 팩터의 Rolling IC/ICIR (최대 3개)")
+            shown = 0
+            for fname, fdata in list(factors_dict.items())[:3]:
+                rolling = self.alpha_engine.calculate_rolling_ic(fdata, future_returns, window=rolling_window)
+                if rolling['ic']:
+                    fig, ax1 = plt.subplots(figsize=(12, 3))
+                    ax1.plot(rolling['dates'], rolling['ic'], label='Rolling IC', color='tab:blue')
+                    ax1.set_ylabel('IC', color='tab:blue')
+                    ax1.tick_params(axis='y', labelcolor='tab:blue')
+                    ax2 = ax1.twinx()
+                    ax2.plot(rolling['dates'], rolling['icir'], label='Rolling ICIR', color='tab:red', alpha=0.6)
+                    ax2.set_ylabel('ICIR', color='tab:red')
+                    ax2.tick_params(axis='y', labelcolor='tab:red')
+                    ax1.set_title(f'{factor_names_ko.get(fname, fname)}의 {rolling_window}일 Rolling IC/ICIR', fontsize=12)
+                    ax1.grid(True, alpha=0.3)
+                    fig.tight_layout()
+                    st.pyplot(fig)
+                    plt.close(fig)
+                    shown += 1
+            if shown == 0:
+                st.info("개별 팩터의 rolling IC/ICIR 시계열을 계산할 수 없습니다.")
+        
+        # 고도화된 AI 해석 적용 버튼
+        if 'use_llm_analysis' not in st.session_state:
+            st.session_state['use_llm_analysis'] = False
+        if st.button('고도화된 AI 해석 적용', key='llm_factor_analysis'):
+            st.session_state['use_llm_analysis'] = True
+        
+        # AI 해석 결과를 expander로 표시
+        with st.expander("🤖 AI 해석 결과", expanded=True):
+            st.info(analyze_factor_performance_text(performance, llm_api_key=None if not st.session_state['use_llm_analysis'] else 'env'))
     
     def _render_backtest_section(self):
         """백테스팅 섹션 렌더링"""
@@ -569,6 +658,10 @@ class AlphaForgeApp:
                 st.subheader("📈 성과 리포트")
                 report_df = backtester.create_performance_report(result)
                 st.dataframe(report_df, use_container_width=True)
+                
+                # AI 해석 결과를 expander로 표시
+                with st.expander("🤖 AI 해석 결과", expanded=True):
+                    st.info(analyze_backtest_performance_text(result.get('performance_metrics', {}), llm_api_key=None if not st.session_state['use_llm_analysis'] else 'env'))
                 
                 # 세션에 결과 저장
                 st.session_state.dl_backtest_results = result
@@ -817,9 +910,26 @@ class AlphaForgeApp:
                         st.session_state.combined_factor_df = ranked_factor
                         st.session_state.individual_factors = {"dl_factor": ranked_factor}
                         st.session_state.factor_generated = True
-
                     st.success("✅ 딥러닝 알파 팩터 생성 완료!")
-
+                    # --- 팩터 Zoo 자동 저장 ---
+                    # rolling IC/ICIR 계산
+                    universe_data = st.session_state.universe_data
+                    future_returns = universe_data.pct_change().shift(-1)
+                    rolling_ic = self.alpha_engine.calculate_rolling_ic(ranked_factor, future_returns, window=20)
+                    now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    factor_label = f"{now_str}_딥러닝"
+                    meta = {
+                        'factor_name': factor_label,
+                        'created_at': now_str,
+                        'factor_types': ['딥러닝'],
+                        'weight_mode': '비선형',
+                        'weights': {},
+                        'performance': {},
+                        'params': {k: getattr(self.config.model, k) for k in dir(self.config.model) if not k.startswith('__') and not callable(getattr(self.config.model, k))},
+                        'rolling_ic': rolling_ic
+                    }
+                    save_factor_to_zoo(factor_label, {'meta': meta, 'factor': ranked_factor})
+                    st.info(f"[팩터 Zoo]에 자동 저장됨: {factor_label}")
                     # 결과 표시
                     st.subheader("📈 딥러닝 팩터 분석")
                     st.metric("데이터 포인트 수", f"{len(qlib_factor):,}")
@@ -829,6 +939,146 @@ class AlphaForgeApp:
                 st.error(f"딥러닝 팩터 생성 중 오류: {e}")
                 import traceback
                 st.code(traceback.format_exc())
+
+    def _render_factor_zoo_section(self):
+        """
+        팩터 Zoo(저장소) UI 섹션: 목록, 상세, 불러오기, 삭제 기능
+        """
+        st.header("🦁 팩터 Zoo (저장된 팩터 관리)")
+        factors = load_factors_from_zoo()
+        if not factors:
+            st.info("저장된 팩터가 없습니다. 팩터를 생성 후 저장해보세요!")
+            return
+        factor_names = list(factors.keys())
+        selected = st.selectbox("저장된 팩터 선택", factor_names)
+        if selected:
+            meta = factors[selected].get('meta', {})
+            st.subheader(f"📄 {selected} - 메타데이터")
+            st.json(meta)
+            # rolling IC/ICIR 시계열 시각화 (있으면)
+            if 'rolling_ic' in meta:
+                import matplotlib.pyplot as plt
+                fig, ax1 = plt.subplots(figsize=(10, 3))
+                ax1.plot(meta['rolling_ic']['dates'], meta['rolling_ic']['ic'], label='Rolling IC', color='tab:blue')
+                ax2 = ax1.twinx()
+                ax2.plot(meta['rolling_ic']['dates'], meta['rolling_ic']['icir'], label='Rolling ICIR', color='tab:red', alpha=0.6)
+                ax1.set_title('Rolling IC/ICIR')
+                ax1.grid(True, alpha=0.3)
+                st.pyplot(fig)
+                plt.close(fig)
+            # 고도화된 AI 해석 적용 버튼
+            if 'use_llm_analysis' not in st.session_state:
+                st.session_state['use_llm_analysis'] = False
+            if st.button('고도화된 AI 해석 적용', key='llm_zoo'):
+                st.session_state['use_llm_analysis'] = True
+            
+            # AI 해석 결과를 expander로 표시
+            with st.expander("🤖 AI 해석 결과", expanded=True):
+                st.info(analyze_factor_performance_text(meta.get('performance', {}), llm_api_key=None if not st.session_state['use_llm_analysis'] else 'env'))
+            # 불러오기 버튼
+            if st.button("이 팩터 불러오기(분석/백테스트에 사용)"):
+                st.session_state.custom_factor = factors[selected]['factor']
+                st.session_state.combined_factor_df = factors[selected]['factor']
+                st.session_state.factor_performance = meta.get('performance', {})
+                st.session_state.factor_generated = True
+                st.success(f"{selected} 팩터를 불러왔습니다! 분석/백테스트 탭에서 바로 사용 가능합니다.")
+            # 삭제 버튼
+            if st.button("이 팩터 삭제", type="secondary"):
+                delete_factor_from_zoo(selected)
+                st.warning(f"{selected} 팩터가 삭제되었습니다. 새로고침 후 목록이 갱신됩니다.")
+
+    def _render_linear_vs_nonlinear_section(self):
+        """
+        선형/비선형 팩터 성능 비교 및 Mega-Alpha 신호 생성 섹션
+        """
+        st.header("⚡ 선형/비선형 팩터 성능 비교")
+        factors = load_factors_from_zoo()
+        if not factors:
+            st.info("팩터 Zoo에 저장된 팩터가 없습니다. 먼저 팩터를 생성/저장하세요!")
+            return
+        # 선형/비선형 팩터 선택
+        linear_candidates = [k for k, v in factors.items() if v['meta'].get('weight_mode') in ["IC 기반 동적 가중치", "고정 가중치 직접 입력"]]
+        nonlinear_candidates = [k for k, v in factors.items() if v['meta'].get('weight_mode') == '비선형']
+        col1, col2 = st.columns(2)
+        with col1:
+            linear_selected = st.selectbox("선형 팩터 선택", linear_candidates, key='linear_factor')
+        with col2:
+            nonlinear_selected = st.selectbox("비선형 팩터 선택", nonlinear_candidates, key='nonlinear_factor')
+        if not linear_selected or not nonlinear_selected:
+            st.warning("선형/비선형 팩터를 모두 선택하세요.")
+            return
+        # rolling IC/ICIR 비교 시각화
+        st.subheader("📉 Rolling IC/ICIR 비교")
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+        if linear_selected:
+            lin_ic = factors[linear_selected]['meta'].get('rolling_ic', {})
+            if lin_ic:
+                ax1.plot(lin_ic['dates'], lin_ic['ic'], label='선형 IC', color='tab:blue')
+                ax1.plot(lin_ic['dates'], lin_ic['icir'], label='선형 ICIR', color='tab:cyan', alpha=0.6)
+                ax1.set_title(f"선형 팩터: {linear_selected}")
+                ax1.legend()
+                ax1.grid(True, alpha=0.3)
+                # 고도화된 AI 해석 적용 버튼
+                if 'use_llm_analysis' not in st.session_state:
+                    st.session_state['use_llm_analysis'] = False
+                if st.button('고도화된 AI 해석 적용', key='llm_linear'):
+                    st.session_state['use_llm_analysis'] = True
+                
+                # AI 해석 결과를 expander로 표시
+                with st.expander("🤖 선형 팩터 AI 해석 결과", expanded=True):
+                    st.info(f"[선형 팩터 해석]\n" + analyze_factor_performance_text(factors[linear_selected]['meta'].get('performance', {}), llm_api_key=None if not st.session_state['use_llm_analysis'] else 'env'))
+        if nonlinear_selected:
+            nonlin_ic = factors[nonlinear_selected]['meta'].get('rolling_ic', {})
+            if nonlin_ic:
+                ax2.plot(nonlin_ic['dates'], nonlin_ic['ic'], label='비선형 IC', color='tab:red')
+                ax2.plot(nonlin_ic['dates'], nonlin_ic['icir'], label='비선형 ICIR', color='tab:orange', alpha=0.6)
+                ax2.set_title(f"비선형 팩터: {nonlinear_selected}")
+                ax2.legend()
+                ax2.grid(True, alpha=0.3)
+                # AI 해석 결과를 expander로 표시
+                with st.expander("🤖 비선형 팩터 AI 해석 결과", expanded=True):
+                    st.info(f"[비선형 팩터 해석]\n" + analyze_factor_performance_text(factors[nonlinear_selected]['meta'].get('performance', {}), llm_api_key=None if not st.session_state['use_llm_analysis'] else 'env'))
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
+        # Mega-Alpha 신호 생성 버튼
+        st.subheader("⚡ Mega-Alpha 신호 생성 및 분석")
+        if st.button("Mega-Alpha 신호 생성/분석"):
+            # 두 팩터를 단순 평균(동적 조합은 추후 확장)으로 결합
+            lin_df = factors[linear_selected]['factor']
+            nonlin_df = factors[nonlinear_selected]['factor']
+            # 공통 인덱스/컬럼만 결합
+            common_idx = lin_df.index.intersection(nonlin_df.index)
+            common_col = lin_df.columns.intersection(nonlin_df.columns)
+            if len(common_idx) == 0 or len(common_col) == 0:
+                st.error("두 팩터의 공통 구간이 없습니다.")
+                return
+            mega_alpha = (lin_df.loc[common_idx, common_col] + nonlin_df.loc[common_idx, common_col]) / 2
+            # rolling IC/ICIR 계산
+            universe_data = st.session_state.universe_data
+            future_returns = universe_data.pct_change().shift(-1)
+            mega_ic = self.alpha_engine.calculate_rolling_ic(mega_alpha, future_returns, window=20)
+            # 시각화
+            fig, ax = plt.subplots(figsize=(12, 3))
+            ax.plot(mega_ic['dates'], mega_ic['ic'], label='Mega-Alpha IC', color='tab:green')
+            ax.plot(mega_ic['dates'], mega_ic['icir'], label='Mega-Alpha ICIR', color='tab:olive', alpha=0.6)
+            ax.set_title("Mega-Alpha 신호의 Rolling IC/ICIR")
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            st.pyplot(fig)
+            plt.close(fig)
+            # 고도화된 AI 해석 적용 버튼
+            if 'use_llm_analysis' not in st.session_state:
+                st.session_state['use_llm_analysis'] = False
+            if st.button('고도화된 AI 해석 적용', key='llm_mega'):
+                st.session_state['use_llm_analysis'] = True
+            
+            # AI 해석 결과를 expander로 표시
+            with st.expander("🤖 Mega-Alpha 신호 AI 해석 결과", expanded=True):
+                st.info(f"[Mega-Alpha 신호 해석]\n" + analyze_factor_performance_text({
+                    'mean_ic': float(np.nanmean(mega_ic['ic'])) if mega_ic['ic'] else 0,
+                    'icir': float(np.nanmean(mega_ic['icir'])) if mega_ic['icir'] else 0
+                }, llm_api_key=None if not st.session_state['use_llm_analysis'] else 'env'))
 
 # 애플리케이션 실행
 if __name__ == "__main__":
