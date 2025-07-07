@@ -70,11 +70,368 @@ class ImprovedFactorMLP(nn.Module):
         importance = torch.abs(gradients).mean(dim=0).detach().cpu().numpy()
         return importance
 
+class LSTMFactorModel(nn.Module):
+    """LSTM 기반 팩터 예측 모델"""
+    
+    def __init__(self, config: ModelConfig, input_dim: int):
+        super().__init__()
+        self.config = config
+        self.input_dim = input_dim
+        
+        self.lstm = nn.LSTM(
+            input_size=input_dim,
+            hidden_size=config.hidden_dim_1,
+            num_layers=2,
+            dropout=config.dropout_rate,
+            batch_first=True,
+            bidirectional=True
+        )
+        
+        self.attention = nn.MultiheadAttention(
+            embed_dim=config.hidden_dim_1 * 2,  # bidirectional
+            num_heads=4,
+            dropout=config.dropout_rate
+        )
+        
+        self.fc_layers = nn.Sequential(
+            nn.Linear(config.hidden_dim_1 * 2, config.hidden_dim_2),
+            nn.BatchNorm1d(config.hidden_dim_2),
+            nn.ReLU(),
+            nn.Dropout(config.dropout_rate),
+            nn.Linear(config.hidden_dim_2, 1)
+        )
+        
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        """가중치 초기화"""
+        for name, param in self.named_parameters():
+            if 'weight' in name:
+                if 'lstm' in name:
+                    nn.init.orthogonal_(param)
+                else:
+                    # 2차원 이상의 텐서에만 xavier_uniform_ 적용
+                    if param.dim() >= 2:
+                        nn.init.xavier_uniform_(param)
+                    else:
+                        nn.init.uniform_(param, -0.1, 0.1)
+            elif 'bias' in name:
+                nn.init.constant_(param, 0)
+    
+    def forward(self, x):
+        # x shape: (batch_size, seq_len, input_dim)
+        lstm_out, _ = self.lstm(x)
+        
+        # Attention 적용
+        lstm_out = lstm_out.transpose(0, 1)  # (seq_len, batch_size, hidden_dim)
+        attn_out, _ = self.attention(lstm_out, lstm_out, lstm_out)
+        attn_out = attn_out.transpose(0, 1)  # (batch_size, seq_len, hidden_dim)
+        
+        # 마지막 시점의 출력 사용
+        last_output = attn_out[:, -1, :]
+        
+        # FC 레이어
+        output = self.fc_layers(last_output)
+        return output
+
+class GRUFactorModel(nn.Module):
+    """GRU 기반 팩터 예측 모델"""
+    
+    def __init__(self, config: ModelConfig, input_dim: int):
+        super().__init__()
+        self.config = config
+        self.input_dim = input_dim
+        
+        self.gru = nn.GRU(
+            input_size=input_dim,
+            hidden_size=config.hidden_dim_1,
+            num_layers=2,
+            dropout=config.dropout_rate,
+            batch_first=True,
+            bidirectional=True
+        )
+        
+        self.fc_layers = nn.Sequential(
+            nn.Linear(config.hidden_dim_1 * 2, config.hidden_dim_2),
+            nn.BatchNorm1d(config.hidden_dim_2),
+            nn.ReLU(),
+            nn.Dropout(config.dropout_rate),
+            nn.Linear(config.hidden_dim_2, 1)
+        )
+        
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        """가중치 초기화"""
+        for name, param in self.named_parameters():
+            if 'weight' in name:
+                if 'gru' in name:
+                    nn.init.orthogonal_(param)
+                else:
+                    # 2차원 이상의 텐서에만 xavier_uniform_ 적용
+                    if param.dim() >= 2:
+                        nn.init.xavier_uniform_(param)
+                    else:
+                        nn.init.uniform_(param, -0.1, 0.1)
+            elif 'bias' in name:
+                nn.init.constant_(param, 0)
+    
+    def forward(self, x):
+        # x shape: (batch_size, seq_len, input_dim)
+        gru_out, _ = self.gru(x)
+        
+        # 마지막 시점의 출력 사용
+        last_output = gru_out[:, -1, :]
+        
+        # FC 레이어
+        output = self.fc_layers(last_output)
+        return output
+
+class TransformerFactorModel(nn.Module):
+    """Transformer 기반 팩터 예측 모델"""
+    
+    def __init__(self, config: ModelConfig, input_dim: int):
+        super().__init__()
+        self.config = config
+        self.input_dim = input_dim
+        
+        # 입력 임베딩
+        self.input_projection = nn.Linear(input_dim, config.hidden_dim_1)
+        
+        # Positional Encoding - 충분히 큰 max_len 설정
+        self.pos_encoder = PositionalEncoding(config.hidden_dim_1, max_len=2000)
+        
+        # Transformer Encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=config.hidden_dim_1,
+            nhead=8,
+            dim_feedforward=config.hidden_dim_1 * 4,
+            dropout=config.dropout_rate,
+            activation='relu',
+            batch_first=True
+        )
+        
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=3
+        )
+        
+        # 출력 레이어
+        self.output_layers = nn.Sequential(
+            nn.Linear(config.hidden_dim_1, config.hidden_dim_2),
+            nn.BatchNorm1d(config.hidden_dim_2),
+            nn.ReLU(),
+            nn.Dropout(config.dropout_rate),
+            nn.Linear(config.hidden_dim_2, 1)
+        )
+        
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        """가중치 초기화"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+    
+    def forward(self, x):
+        # x shape: (batch_size, seq_len, input_dim)
+        
+        # 입력 프로젝션
+        x = self.input_projection(x)
+        
+        # Positional Encoding 추가
+        x = self.pos_encoder(x)
+        
+        # Transformer 인코더
+        transformer_out = self.transformer(x)
+        
+        # 마지막 시점의 출력 사용
+        last_output = transformer_out[:, -1, :]
+        
+        # 출력 레이어
+        output = self.output_layers(last_output)
+        return output
+
+class PositionalEncoding(nn.Module):
+    """Positional Encoding for Transformer"""
+    
+    def __init__(self, d_model: int, max_len: int = 5000):
+        super().__init__()
+        
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        
+        # (max_len, d_model) 형태로 저장
+        self.register_buffer('pe', pe)
+    
+    def forward(self, x):
+        # x shape: (batch_size, seq_len, d_model)
+        # pe shape: (max_len, d_model)
+        # x.size(1)은 시퀀스 길이
+        return x + self.pe[:x.size(1), :].unsqueeze(0)
+
+class CNN1DFactorModel(nn.Module):
+    """1D CNN 기반 팩터 예측 모델"""
+    
+    def __init__(self, config: ModelConfig, input_dim: int):
+        super().__init__()
+        self.config = config
+        self.input_dim = input_dim
+        
+        # 1D CNN 레이어들
+        self.conv_layers = nn.Sequential(
+            nn.Conv1d(input_dim, 64, kernel_size=3, padding=1),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(config.dropout_rate),
+            
+            nn.Conv1d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(config.dropout_rate),
+            
+            nn.Conv1d(128, config.hidden_dim_1, kernel_size=3, padding=1),
+            nn.BatchNorm1d(config.hidden_dim_1),
+            nn.ReLU(),
+            nn.Dropout(config.dropout_rate)
+        )
+        
+        # Global Average Pooling
+        self.global_pool = nn.AdaptiveAvgPool1d(1)
+        
+        # FC 레이어들
+        self.fc_layers = nn.Sequential(
+            nn.Linear(config.hidden_dim_1, config.hidden_dim_2),
+            nn.BatchNorm1d(config.hidden_dim_2),
+            nn.ReLU(),
+            nn.Dropout(config.dropout_rate),
+            nn.Linear(config.hidden_dim_2, 1)
+        )
+        
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        """가중치 초기화"""
+        for module in self.modules():
+            if isinstance(module, nn.Conv1d):
+                nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+            elif isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+    
+    def forward(self, x):
+        # x shape: (batch_size, seq_len, input_dim)
+        # CNN을 위해 차원 변환: (batch_size, input_dim, seq_len)
+        x = x.transpose(1, 2)
+        
+        # CNN 레이어들
+        conv_out = self.conv_layers(x)
+        
+        # Global Average Pooling
+        pooled = self.global_pool(conv_out).squeeze(-1)
+        
+        # FC 레이어들
+        output = self.fc_layers(pooled)
+        return output
+
+class HybridFactorModel(nn.Module):
+    """하이브리드 모델 (CNN + LSTM)"""
+    
+    def __init__(self, config: ModelConfig, input_dim: int):
+        super().__init__()
+        self.config = config
+        self.input_dim = input_dim
+        
+        # CNN 부분
+        self.cnn_layers = nn.Sequential(
+            nn.Conv1d(input_dim, 32, kernel_size=3, padding=1),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.Dropout(config.dropout_rate),
+            
+            nn.Conv1d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(config.dropout_rate)
+        )
+        
+        # LSTM 부분
+        self.lstm = nn.LSTM(
+            input_size=64,
+            hidden_size=config.hidden_dim_1,
+            num_layers=2,
+            dropout=config.dropout_rate,
+            batch_first=True,
+            bidirectional=True
+        )
+        
+        # 출력 레이어
+        self.output_layers = nn.Sequential(
+            nn.Linear(config.hidden_dim_1 * 2, config.hidden_dim_2),
+            nn.BatchNorm1d(config.hidden_dim_2),
+            nn.ReLU(),
+            nn.Dropout(config.dropout_rate),
+            nn.Linear(config.hidden_dim_2, 1)
+        )
+        
+        self._initialize_weights()
+    
+    def _initialize_weights(self):
+        """가중치 초기화"""
+        for module in self.modules():
+            if isinstance(module, nn.Conv1d):
+                nn.init.kaiming_normal_(module.weight, mode='fan_out', nonlinearity='relu')
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+            elif isinstance(module, nn.LSTM):
+                for name, param in module.named_parameters():
+                    if 'weight' in name:
+                        nn.init.orthogonal_(param)
+                    elif 'bias' in name:
+                        nn.init.constant_(param, 0)
+            elif isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+    
+    def forward(self, x):
+        # x shape: (batch_size, seq_len, input_dim)
+        batch_size, seq_len, _ = x.shape
+        
+        # CNN을 위해 차원 변환
+        x = x.transpose(1, 2)  # (batch_size, input_dim, seq_len)
+        
+        # CNN 레이어들
+        cnn_out = self.cnn_layers(x)
+        
+        # LSTM을 위해 차원 변환
+        cnn_out = cnn_out.transpose(1, 2)  # (batch_size, seq_len, 64)
+        
+        # LSTM
+        lstm_out, _ = self.lstm(cnn_out)
+        
+        # 마지막 시점의 출력 사용
+        last_output = lstm_out[:, -1, :]
+        
+        # 출력 레이어
+        output = self.output_layers(last_output)
+        return output
+
 class ModelTrainer:
     """모델 학습을 담당하는 클래스"""
     
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: ModelConfig, model_type: str = "mlp"):
         self.config = config
+        self.model_type = model_type
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.scaler = StandardScaler()
         self.model = None
@@ -84,6 +441,24 @@ class ModelTrainer:
             logger.info(f"GPU 사용 가능: {torch.cuda.get_device_name()}")
         else:
             logger.info("CPU 사용")
+    
+    def create_model(self, input_dim: int) -> nn.Module:
+        """모델 타입에 따라 적절한 모델 생성"""
+        if self.model_type == "mlp":
+            return ImprovedFactorMLP(self.config, input_dim)
+        elif self.model_type == "lstm":
+            return LSTMFactorModel(self.config, input_dim)
+        elif self.model_type == "gru":
+            return GRUFactorModel(self.config, input_dim)
+        elif self.model_type == "transformer":
+            return TransformerFactorModel(self.config, input_dim)
+        elif self.model_type == "cnn1d":
+            return CNN1DFactorModel(self.config, input_dim)
+        elif self.model_type == "hybrid":
+            return HybridFactorModel(self.config, input_dim)
+        else:
+            logger.warning(f"알 수 없는 모델 타입: {self.model_type}. MLP를 사용합니다.")
+            return ImprovedFactorMLP(self.config, input_dim)
     
     def prepare_data(self, X: np.ndarray, y: np.ndarray) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader, StandardScaler]:
         """데이터 전처리 및 DataLoader 생성"""
@@ -104,6 +479,21 @@ class ModelTrainer:
         X_val_tensor = torch.tensor(X_val_scaled, dtype=torch.float32)
         y_val_tensor = torch.tensor(y_val, dtype=torch.float32).unsqueeze(1)
         
+        # 시계열 모델의 경우 3D 텐서로 변환
+        if self.model_type in ["lstm", "gru", "transformer", "cnn1d", "hybrid"]:
+            # 시계열 데이터로 재구성 (window_size x features)
+            X_train_reshaped, y_train_reshaped = self._reshape_for_sequence(X_train_tensor, y_train_tensor)
+            X_val_reshaped, y_val_reshaped = self._reshape_for_sequence(X_val_tensor, y_val_tensor)
+            
+            X_train_tensor = X_train_reshaped
+            y_train_tensor = y_train_reshaped
+            X_val_tensor = X_val_reshaped
+            y_val_tensor = y_val_reshaped
+        
+        # 텐서 크기 검증
+        assert X_train_tensor.shape[0] == y_train_tensor.shape[0], f"X_train: {X_train_tensor.shape}, y_train: {y_train_tensor.shape}"
+        assert X_val_tensor.shape[0] == y_val_tensor.shape[0], f"X_val: {X_val_tensor.shape}, y_val: {y_val_tensor.shape}"
+        
         # DataLoader 생성
         train_dataset = torch.utils.data.TensorDataset(X_train_tensor, y_train_tensor)
         val_dataset = torch.utils.data.TensorDataset(X_val_tensor, y_val_tensor)
@@ -117,7 +507,46 @@ class ModelTrainer:
         
         return train_loader, val_loader, self.scaler
     
-    def train_model(self, X: np.ndarray, y: np.ndarray, show_progress: bool = True) -> ImprovedFactorMLP:
+    def _reshape_for_sequence(self, X: torch.Tensor, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """시계열 모델을 위해 데이터를 3D로 재구성"""
+        # (batch_size, features) -> (batch_size, seq_len, features)
+        batch_size = X.shape[0]
+        features = X.shape[1]
+        
+        # 시퀀스 길이 계산 (window_size 사용)
+        seq_len = min(self.config.window_size, batch_size)
+        
+        # 패딩이 필요한 경우
+        if batch_size < seq_len:
+            # 패딩으로 seq_len 맞추기
+            padding = torch.zeros(seq_len - batch_size, features)
+            X = torch.cat([padding, X], dim=0)
+            y_padding = torch.zeros(seq_len - batch_size, 1)
+            y = torch.cat([y_padding, y], dim=0)
+            batch_size = seq_len
+        
+        # 시퀀스로 재구성
+        X_sequences = []
+        y_sequences = []
+        
+        for i in range(batch_size - seq_len + 1):
+            X_sequence = X[i:i+seq_len]
+            y_sequence = y[i+seq_len-1]  # 시퀀스의 마지막 시점의 y값 사용
+            
+            X_sequences.append(X_sequence)
+            y_sequences.append(y_sequence)
+        
+        if X_sequences:
+            X_reshaped = torch.stack(X_sequences)
+            y_reshaped = torch.stack(y_sequences)
+            return X_reshaped, y_reshaped
+        else:
+            # 최소한의 시퀀스 생성
+            X_reshaped = X.unsqueeze(0)
+            y_reshaped = y.unsqueeze(0)
+            return X_reshaped, y_reshaped
+    
+    def train_model(self, X: np.ndarray, y: np.ndarray, show_progress: bool = True) -> nn.Module:
         """모델 학습"""
         
         if len(X) == 0:
@@ -128,7 +557,8 @@ class ModelTrainer:
         train_loader, val_loader, scaler = self.prepare_data(X, y)
         
         # 모델 생성
-        self.model = ImprovedFactorMLP(self.config, X.shape[1]).to(self.device)
+        input_dim = X.shape[1] if self.model_type == "mlp" else X.shape[1]
+        self.model = self.create_model(input_dim).to(self.device)
         
         # 옵티마이저 및 스케줄러 설정
         optimizer = torch.optim.Adam(
@@ -139,7 +569,7 @@ class ModelTrainer:
         
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='min', patience=self.config.lr_scheduler_patience, 
-            factor=0.5, verbose=False
+            factor=0.5
         )
         
         loss_fn = nn.MSELoss()
@@ -207,9 +637,8 @@ class ModelTrainer:
         }
         
         if show_progress:
-            progress_bar.empty()
-            status_text.success(f"학습 완료! 최종 검증 손실: {best_val_loss:.6f}")
-            self._plot_training_progress(train_losses, val_losses, loss_chart)
+            progress_bar.progress(1.0)
+            status_text.text(f"학습 완료! 최고 검증 손실: {best_val_loss:.6f}")
         
         return self.model
     
@@ -275,6 +704,12 @@ class ModelTrainer:
         X_scaled = self.scaler.transform(X)
         X_tensor = torch.tensor(X_scaled, dtype=torch.float32).to(self.device)
         
+        # 시계열 모델의 경우 3D 텐서로 변환
+        if self.model_type in ["lstm", "gru", "transformer", "cnn1d", "hybrid"]:
+            # 예측용 더미 y 텐서 생성 (실제로는 사용되지 않음)
+            y_dummy = torch.zeros(X_tensor.shape[0], 1, dtype=torch.float32).to(self.device)
+            X_tensor, _ = self._reshape_for_sequence(X_tensor, y_dummy)
+        
         with torch.no_grad():
             predictions = self.model(X_tensor).cpu().numpy().flatten()
         
@@ -336,7 +771,7 @@ class ModelTrainer:
             
             # 모델 생성 및 가중치 로드
             input_dim = self.scaler.n_features_in_
-            self.model = ImprovedFactorMLP(self.config, input_dim).to(self.device)
+            self.model = self.create_model(input_dim).to(self.device)
             self.model.load_state_dict(checkpoint['model_state_dict'])
             
             st.success(f"모델이 로드되었습니다: {filepath}")

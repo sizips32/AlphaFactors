@@ -155,6 +155,150 @@ def display_error_with_suggestions(error_msg: str, suggestions: List[str] = None
             for i, suggestion in enumerate(suggestions, 1):
                 st.write(f"{i}. {suggestion}")
 
+def show_success_with_details(success_msg: str, details: dict = None):
+    """성공 메시지와 상세 정보 표시"""
+    st.success(success_msg)
+    
+    if details:
+        with st.expander("📊 상세 정보", expanded=False):
+            for key, value in details.items():
+                if isinstance(value, (int, float)):
+                    if 'ratio' in key.lower() or 'sharpe' in key.lower():
+                        st.write(f"**{key}**: {value:.4f}")
+                    elif 'return' in key.lower():
+                        st.write(f"**{key}**: {value:.2%}")
+                    else:
+                        st.write(f"**{key}**: {value:.4f}")
+                else:
+                    st.write(f"**{key}**: {value}")
+
+def show_warning_with_help(warning_msg: str, help_text: str = None):
+    """경고 메시지와 도움말 표시"""
+    st.warning(warning_msg)
+    
+    if help_text:
+        with st.expander("❓ 도움말", expanded=False):
+            st.info(help_text)
+
+def validate_user_input(input_data: dict, required_fields: List[str]) -> Tuple[bool, List[str]]:
+    """사용자 입력 검증"""
+    errors = []
+    
+    for field in required_fields:
+        if field not in input_data or input_data[field] is None:
+            errors.append(f"'{field}' 필드가 필요합니다.")
+        elif isinstance(input_data[field], str) and not input_data[field].strip():
+            errors.append(f"'{field}' 필드가 비어있습니다.")
+        elif isinstance(input_data[field], (list, tuple)) and len(input_data[field]) == 0:
+            errors.append(f"'{field}' 필드에 최소 하나의 항목이 필요합니다.")
+    
+    return len(errors) == 0, errors
+
+def show_progress_with_status(message: str, progress_bar=None):
+    """진행 상황 표시"""
+    if progress_bar is None:
+        progress_bar = st.progress(0)
+    
+    return progress_bar
+
+def display_performance_summary(performance_metrics: dict, title: str = "성과 요약"):
+    """성과 지표 요약 표시"""
+    st.subheader(title)
+    
+    # 주요 지표들을 카테고리별로 분류
+    return_metrics = {k: v for k, v in performance_metrics.items() if 'return' in k.lower()}
+    risk_metrics = {k: v for k, v in performance_metrics.items() if any(x in k.lower() for x in ['volatility', 'drawdown', 'var'])}
+    ratio_metrics = {k: v for k, v in performance_metrics.items() if any(x in k.lower() for x in ['sharpe', 'sortino', 'calmar'])}
+    ic_metrics = {k: v for k, v in performance_metrics.items() if 'ic' in k.lower()}
+    
+    # 수익률 지표
+    if return_metrics:
+        st.markdown("**📈 수익률 지표**")
+        col1, col2, col3 = st.columns(3)
+        for i, (key, value) in enumerate(return_metrics.items()):
+            with [col1, col2, col3][i % 3]:
+                st.metric(key, f"{value:.2%}")
+    
+    # 리스크 지표
+    if risk_metrics:
+        st.markdown("**⚠️ 리스크 지표**")
+        col1, col2, col3 = st.columns(3)
+        for i, (key, value) in enumerate(risk_metrics.items()):
+            with [col1, col2, col3][i % 3]:
+                st.metric(key, f"{value:.4f}")
+    
+    # 비율 지표
+    if ratio_metrics:
+        st.markdown("**📊 비율 지표**")
+        col1, col2, col3 = st.columns(3)
+        for i, (key, value) in enumerate(ratio_metrics.items()):
+            with [col1, col2, col3][i % 3]:
+                st.metric(key, f"{value:.4f}")
+    
+    # IC 지표
+    if ic_metrics:
+        st.markdown("**🎯 IC 지표**")
+        col1, col2, col3 = st.columns(3)
+        for i, (key, value) in enumerate(ic_metrics.items()):
+            with [col1, col2, col3][i % 3]:
+                st.metric(key, f"{value:.4f}")
+
+def create_download_link(data, filename: str, file_type: str = "csv"):
+    """다운로드 링크 생성"""
+    import base64
+    
+    if file_type == "csv":
+        csv = data.to_csv(index=True)
+        b64 = base64.b64encode(csv.encode()).decode()
+        href = f'<a href="data:file/csv;base64,{b64}" download="{filename}.csv">📥 CSV 다운로드</a>'
+    elif file_type == "excel":
+        import io
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            data.to_excel(writer, index=True)
+        buffer.seek(0)
+        b64 = base64.b64encode(buffer.getvalue()).decode()
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="{filename}.xlsx">📥 Excel 다운로드</a>'
+    
+    return href
+
+def show_data_quality_report(df: pd.DataFrame, title: str = "데이터 품질 리포트"):
+    """데이터 품질 리포트 표시"""
+    st.subheader(title)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("총 행 수", len(df))
+    
+    with col2:
+        st.metric("총 열 수", len(df.columns))
+    
+    with col3:
+        missing_pct = (df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100
+        st.metric("결측값 비율", f"{missing_pct:.2f}%")
+    
+    with col4:
+        duplicate_rows = df.duplicated().sum()
+        st.metric("중복 행", duplicate_rows)
+    
+    # 결측값 상세
+    if df.isnull().any().any():
+        st.markdown("**🔍 결측값 상세**")
+        missing_data = df.isnull().sum()
+        missing_data = missing_data[missing_data > 0]
+        st.bar_chart(missing_data)
+    
+    # 데이터 타입 정보
+    st.markdown("**📋 데이터 타입 정보**")
+    dtype_info = pd.DataFrame({
+        '컬럼명': df.columns,
+        '데이터 타입': df.dtypes,
+        '고유값 수': df.nunique(),
+        '결측값 수': df.isnull().sum()
+    })
+    st.dataframe(dtype_info, use_container_width=True)
+
 def cache_key_generator(*args) -> str:
     """캐시 키 생성"""
     return "_".join(str(arg) for arg in args)

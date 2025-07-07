@@ -327,20 +327,20 @@ class FactorBacktester:
                 
                 if result:
                     results[korean_name] = result
+                    st.success(f"✅ {korean_name} 팩터 백테스팅 완료")
                     
             except Exception as e:
-                st.warning(f"{korean_name} 팩터 백테스팅 실패: {e}")
+                st.warning(f"⚠️ {korean_name} 팩터 백테스팅 실패: {e}")
                 continue
         
         progress_bar.empty()
         
         if results:
             st.success(f"✅ {len(results)}개 팩터 백테스팅 완료")
-            self._display_factor_comparison(results)
+            return results
         else:
-            st.error("백테스팅에 성공한 팩터가 없습니다.")
-        
-        return results
+            st.error("❌ 백테스팅에 성공한 팩터가 없습니다.")
+            return {}
     
     def _display_factor_comparison(self, results: Dict[str, Dict]):
         """팩터 비교 결과 표시"""
