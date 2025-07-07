@@ -140,7 +140,7 @@ class AlphaForgeApp:
             - IC 기반 성능 분석
             
             {step3_status} **3단계: 백테스팅**
-            - Qlib 포트폴리오 분석
+            - 포트폴리오 성과 분석
             - 리스크 지표 계산
             """)
             
@@ -311,7 +311,7 @@ class AlphaForgeApp:
                 - 팩터 성능 분석 및 검증 (IC, ICIR)
                 
                 **3단계: 백테스팅** ⏳
-                - Qlib 기반 포트폴리오 백테스팅
+                - 포트폴리오 백테스팅 및 성과 분석
                 - 리스크 지표 및 수익률 분석
                 - 결과 시각화 및 리포트 생성
                 """)
@@ -330,7 +330,7 @@ class AlphaForgeApp:
                 - `scipy`: 통계적 계산 및 최적화
                 
                 **백테스팅**
-                - `pyqlib`: Microsoft Qlib 기반 전문 백테스팅
+                - 커스텀 포트폴리오 백테스터: 전문적인 성과 분석
                 - `matplotlib`, `seaborn`: 시각화
                 
                 **웹 인터페이스**
@@ -1021,23 +1021,20 @@ class AlphaForgeApp:
     
     def _render_backtest_section(self):
         """백테스팅 섹션 렌더링"""
-        st.header("3. 📊 Qlib 포트폴리오 백테스팅")
+        st.header("3. 📊 포트폴리오 백테스팅")
         
         if not st.session_state.get('factor_generated', False):
             st.warning("먼저 알파 팩터를 생성하세요.")
             return
         
-        # 백테스팅 방법 선택
+        # 백테스팅 설정
         st.subheader("🔧 백테스팅 설정")
         
         col1, col2 = st.columns(2)
         
         with col1:
-            backtest_method = st.selectbox(
-                "백테스팅 방법",
-                ["상세 분석 백테스터 (추천)", "Qlib 백테스팅"],
-                help="'상세 분석 백테스터'는 직접 구현한 백테스터로, 상세한 성과 분석과 시각화를 제공합니다. 'Qlib 백테스팅'은 Qlib의 표준 리스크 분석에 유용합니다."
-            )
+            # 백테스팅 파라미터는 하단에서 설정됩니다
+            st.info("💡 이제 Qlib 없이 더 간단하고 안정적인 백테스팅을 제공합니다.")
         
         with col2:
             strategy_type = st.selectbox(
@@ -1125,14 +1122,11 @@ class AlphaForgeApp:
             elif strategy_type == "Sector Rotation (섹터 로테이션)" and (not selected_sectors or len(selected_sectors) == 0):
                 st.error("섹터 로테이션은 1개 이상의 섹터를 선택해야 합니다.")
             else:
-                # 실행
-                if backtest_method == "상세 분석 백테스터 (추천)":
-                    self._run_custom_backtest(
-                        strategy_type == "Long Only (매수 전용)",
-                        rebalance_freq, transaction_cost, max_position
-                    )
-                else:
-                    self._run_qlib_backtest()
+                # 백테스팅 실행
+                self._run_custom_backtest(
+                    strategy_type == "Long Only (매수 전용)",
+                    rebalance_freq, transaction_cost, max_position
+                )
     
     def _run_custom_backtest(self, long_only: bool, rebalance_freq: str, 
                                   transaction_cost: float, max_position: float):
@@ -1531,43 +1525,6 @@ class AlphaForgeApp:
         except Exception as e:
             st.error(f"결과 내보내기 실패: {e}")
     
-    def _run_qlib_backtest(self):
-        """Qlib 백테스팅 실행 (백업 옵션)"""
-        
-        if not self.qlib_handler.check_availability():
-            st.error("❌ Qlib이 초기화되지 않았습니다.")
-            st.info("📝 Qlib 설치 및 데이터 설정이 필요합니다:")
-            st.code("""
-            # Qlib 설치
-            pip install pyqlib
-            
-            # 미국 데이터셋 다운로드
-            python -m qlib.run.get_data qlib_data --target_dir ~/.qlib/qlib_data/us_data --region us
-            """)
-            return
-        
-        try:
-            custom_factor = st.session_state.get('custom_factor')
-            instrument = "sp500"  # 기본값
-            
-            with st.spinner("Qlib 백테스팅 실행 중..."):
-                cum_returns, risk_metrics = self.qlib_handler.run_backtest(
-                    instrument=instrument,
-                    custom_factor=custom_factor,
-                    show_details=True
-                )
-            
-            if cum_returns is not None and risk_metrics is not None:
-                st.session_state.qlib_backtest_results = {
-                    'cum_returns': cum_returns,
-                    'risk_metrics': risk_metrics
-                }
-                st.session_state.backtest_completed = True  # 진행 상황 업데이트
-                st.success("✅ Qlib 백테스팅 완료!")
-                
-        except Exception as e:
-            st.error(f"❌ Qlib 백테스팅 실패: {e}")
-            st.info("💡 Qlib 백테스팅 대신 상세 분석 백테스터를 사용해보세요. 더 안정적이고 유연합니다.")
     
     def _export_backtest_results(self, result: Dict):
         """백테스팅 결과 내보내기"""
