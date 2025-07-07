@@ -1789,11 +1789,34 @@ class AlphaForgeApp:
             
             # 백테스트 실행 버튼
             if st.button("📊 Mega-Alpha 신호 백테스트 실행", type="primary"):
-                qlib_factor = self.alpha_engine.convert_to_qlib_format(st.session_state.mega_alpha_factor)
-                st.session_state.custom_factor = qlib_factor
-                st.session_state.combined_factor_df = st.session_state.mega_alpha_factor
-                st.session_state.factor_generated = True
-                st.success("Mega-Alpha 신호로 백테스트를 실행할 수 있습니다!")
+                try:
+                    with st.spinner("Mega-Alpha 신호 백테스트 실행 중..."):
+                        # Qlib 형식으로 변환
+                        qlib_factor = self.alpha_engine.convert_to_qlib_format(st.session_state.mega_alpha_factor)
+                        
+                        # 백테스트 실행
+                        cum_returns, risk_metrics = self.qlib_handler.run_backtest(
+                            custom_factor=qlib_factor,
+                            show_details=False
+                        )
+                        
+                        if cum_returns is not None and risk_metrics is not None:
+                            # 세션에 결과 저장
+                            st.session_state.mega_alpha_backtest_results = {
+                                'cum_returns': cum_returns,
+                                'risk_metrics': risk_metrics,
+                                'factor_data': qlib_factor
+                            }
+                            st.success("✅ Mega-Alpha 신호 백테스트 완료!")
+                        else:
+                            st.error("❌ 백테스트 실행에 실패했습니다.")
+                            
+                except Exception as e:
+                    st.error(f"Mega-Alpha 백테스트 실행 중 오류: {e}")
+            
+            # 백테스트 결과 표시
+            if 'mega_alpha_backtest_results' in st.session_state:
+                self._render_mega_alpha_backtest_results(st.session_state.mega_alpha_backtest_results)
 
     def _render_formula_factor_section(self):
         """
@@ -2294,6 +2317,136 @@ class AlphaForgeApp:
                 
                 for metric, value in stability_metrics.items():
                     st.write(f"• {metric}: {value}")
+    
+    def _render_mega_alpha_backtest_results(self, results: Dict[str, Any]):
+        """Mega-Alpha 백테스트 결과 렌더링"""
+        st.markdown("---")
+        st.subheader("📊 Mega-Alpha 백테스트 결과")
+        
+        cum_returns = results.get('cum_returns')
+        risk_metrics = results.get('risk_metrics')
+        
+        if cum_returns is None or risk_metrics is None:
+            st.warning("백테스트 결과가 없습니다.")
+            return
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📈 누적 수익률 차트**")
+            fig, ax = plt.subplots(figsize=(10, 6))
+            cum_returns.plot(ax=ax, linewidth=2, color='darkgreen')
+            ax.set_title('Mega-Alpha 포트폴리오 누적 수익률', fontsize=14, fontweight='bold')
+            ax.set_xlabel('날짜')
+            ax.set_ylabel('누적 수익률')
+            ax.grid(True, alpha=0.3)
+            
+            # 수익률 구간별 색상 구분
+            ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.5, label='Break-even')
+            ax.legend()
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+            
+            # 주요 성과 지표
+            st.markdown("**💰 핵심 성과 지표**")
+            daily_returns = cum_returns.pct_change().dropna()
+            total_return = cum_returns.iloc[-1] - 1
+            volatility = daily_returns.std() * np.sqrt(252)
+            sharpe_ratio = (daily_returns.mean() * 252) / (daily_returns.std() * np.sqrt(252))
+            max_drawdown = self._calculate_max_drawdown(cum_returns)
+            
+            performance_metrics = {
+                '총 수익률': f"{total_return:.2%}",
+                '연간 변동성': f"{volatility:.2%}",
+                '샤프 비율': f"{sharpe_ratio:.3f}",
+                '최대 손실폭': f"{max_drawdown:.2%}",
+                '승률': f"{(daily_returns > 0).mean():.1%}"
+            }
+            
+            for metric, value in performance_metrics.items():
+                st.metric(metric, value)
+        
+        with col2:
+            st.markdown("**📊 리스크 분석**")
+            
+            # IC 및 ICIR 정보
+            ic_metrics = ['IC', 'ICIR', 'Rank IC', 'Rank ICIR']
+            ic_data = {}
+            for metric in ic_metrics:
+                if metric in risk_metrics:
+                    ic_data[metric] = f"{risk_metrics[metric]:.4f}"
+            
+            if ic_data:
+                st.markdown("**정보 계수 (IC) 지표**")
+                for metric, value in ic_data.items():
+                    st.write(f"• {metric}: {value}")
+                st.write("")
+            
+            # 일별 수익률 분포
+            st.markdown("**일별 수익률 분포**")
+            fig, ax = plt.subplots(figsize=(8, 5))
+            daily_returns.hist(bins=30, ax=ax, alpha=0.7, color='steelblue')
+            ax.axvline(daily_returns.mean(), color='red', linestyle='--', 
+                      label=f'평균: {daily_returns.mean():.4f}')
+            ax.axvline(daily_returns.quantile(0.05), color='orange', linestyle='--', 
+                      label=f'5% VaR: {daily_returns.quantile(0.05):.4f}')
+            ax.set_xlabel('일별 수익률')
+            ax.set_ylabel('빈도')
+            ax.set_title('수익률 분포')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+            
+            # 월별 수익률 테이블
+            st.markdown("**📅 월별 수익률**")
+            monthly_returns = cum_returns.resample('M').last().pct_change().dropna()
+            if len(monthly_returns) > 0:
+                monthly_stats = {
+                    '월평균 수익률': f"{monthly_returns.mean():.2%}",
+                    '월수익률 변동성': f"{monthly_returns.std():.2%}",
+                    '최고 월수익률': f"{monthly_returns.max():.2%}",
+                    '최저 월수익률': f"{monthly_returns.min():.2%}",
+                    '양수 월 비율': f"{(monthly_returns > 0).mean():.1%}"
+                }
+                
+                for stat, value in monthly_stats.items():
+                    st.write(f"• {stat}: {value}")
+        
+        # 성과 해석
+        st.markdown("---")
+        st.markdown("**🎯 Mega-Alpha 백테스트 해석**")
+        
+        if total_return > 0.1:
+            performance_rating = "우수"
+            color = "green"
+        elif total_return > 0.05:
+            performance_rating = "양호"
+            color = "blue"
+        elif total_return > 0:
+            performance_rating = "보통"
+            color = "orange"
+        else:
+            performance_rating = "부진"
+            color = "red"
+        
+        st.markdown(f"""
+        **종합 평가**: :{color}[{performance_rating}]
+        
+        • **수익성**: {total_return:.1%}의 총 수익률을 달성했습니다.
+        • **위험도**: {volatility:.1%}의 연간 변동성을 보였습니다.
+        • **효율성**: {sharpe_ratio:.2f}의 샤프 비율로 위험 대비 수익률을 측정했습니다.
+        • **안정성**: 최대 {abs(max_drawdown):.1%}의 손실 구간을 경험했습니다.
+        """)
+    
+    def _calculate_max_drawdown(self, cum_returns: pd.Series) -> float:
+        """최대 손실폭 계산"""
+        running_max = cum_returns.expanding().max()
+        drawdown = (cum_returns - running_max) / running_max
+        return drawdown.min()
 
 # 애플리케이션 실행
 if __name__ == "__main__":
