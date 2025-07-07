@@ -200,13 +200,19 @@ class DataHandler:
 
         return np.array(X), np.array(y), dates
 
-    def clear_cache(self, max_age_days: int = 7, max_size_mb: int = 500):
+    def clear_cache(self, max_age_days: int = 7, max_size_mb: int = 500, clear_all: bool = False):
         """캐시 정리 (오래된 파일 및 크기 제한)"""
         cache_dir = os.path.join(self.local_path, 'cache')
         removed_count = 0
         total_size = 0
         
         try:
+            # 캐시 디렉토리가 존재하지 않으면 생성 후 종료
+            if not os.path.exists(cache_dir):
+                os.makedirs(cache_dir, exist_ok=True)
+                st.success("캐시 디렉토리를 생성했습니다. 캐시할 데이터가 없습니다.")
+                return
+            
             # 파일 크기와 수정 시간 정보 수집
             files_info = []
             for filename in os.listdir(cache_dir):
@@ -220,24 +226,31 @@ class DataHandler:
             # 크기 제한 확인 (MB 단위)
             total_size_mb = total_size / (1024 * 1024)
             
-            # 오래된 파일 삭제
-            for file_path, file_size, file_age in files_info:
-                if file_age > timedelta(days=max_age_days):
-                    os.remove(file_path)
-                    removed_count += 1
-                    total_size_mb -= file_size / (1024 * 1024)
-            
-            # 크기 제한 초과시 오래된 순으로 추가 삭제
-            if total_size_mb > max_size_mb:
-                files_info = [(p, s, a) for p, s, a in files_info if os.path.exists(p)]
-                files_info.sort(key=lambda x: x[2], reverse=True)  # 오래된 순
-                
+            # 모든 캐시 파일 삭제 옵션
+            if clear_all:
                 for file_path, file_size, _ in files_info:
-                    if total_size_mb <= max_size_mb:
-                        break
                     os.remove(file_path)
                     removed_count += 1
                     total_size_mb -= file_size / (1024 * 1024)
+            else:
+                # 오래된 파일 삭제
+                for file_path, file_size, file_age in files_info:
+                    if file_age > timedelta(days=max_age_days):
+                        os.remove(file_path)
+                        removed_count += 1
+                        total_size_mb -= file_size / (1024 * 1024)
+                
+                # 크기 제한 초과시 오래된 순으로 추가 삭제
+                if total_size_mb > max_size_mb:
+                    files_info = [(p, s, a) for p, s, a in files_info if os.path.exists(p)]
+                    files_info.sort(key=lambda x: x[2], reverse=True)  # 오래된 순
+                    
+                    for file_path, file_size, _ in files_info:
+                        if total_size_mb <= max_size_mb:
+                            break
+                        os.remove(file_path)
+                        removed_count += 1
+                        total_size_mb -= file_size / (1024 * 1024)
             
             st.success(f"캐시 정리 완료: {removed_count}개 파일 삭제, 현재 크기: {total_size_mb:.1f}MB")
         except Exception as e:
@@ -254,6 +267,10 @@ class DataHandler:
         }
         
         try:
+            # 캐시 디렉토리가 존재하지 않으면 기본값 반환
+            if not os.path.exists(cache_dir):
+                return info
+                
             files = os.listdir(cache_dir)
             info['cache_files'] = len(files)
             

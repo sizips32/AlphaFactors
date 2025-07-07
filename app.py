@@ -180,7 +180,15 @@ class AlphaForgeApp:
             
             # 캐시 정리 버튼 클릭 시에만 rerun (데이터/상태가 완전히 초기화되어야 하므로 필요)
             if st.button("캐시 정리"):
-                self.data_handler.clear_cache()
+                self.data_handler.clear_cache(clear_all=True)
+                # 세션 상태 초기화 (캐시와 함께 모든 데이터 초기화)
+                for key in list(st.session_state.keys()):
+                    if key not in ['data_loaded', 'universe_loaded', 'factor_generated', 'tab_states']:
+                        del st.session_state[key]
+                # 로딩 상태 초기화
+                st.session_state.data_loaded = False
+                st.session_state.universe_loaded = False
+                st.session_state.factor_generated = False
                 st.rerun()  # 반드시 필요: 캐시/상태 완전 초기화
             
             # 팩터 Zoo 상태
