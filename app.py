@@ -105,11 +105,11 @@ class AlphaForgeApp:
     
     def _setup_page(self):
         """페이지 설정"""
-        st.title("🚀 AlphaFactors: 미국주식 알파 팩터 + Qlib 백테스팅 플랫폼")
+        st.title("🚀 AlphaFactors: 미국주식 알파 팩터 생성 및 분석 플랫폼")
         st.markdown("""
         <div style='text-align: center; color: #666; margin-bottom: 20px;'>
-        <p><strong>퀀트 투자 연구를 위한 전문적인 알파 팩터 생성 및 백테스팅 플랫폼</strong></p>
-        <p>횡단면 순위 기반 팩터 • 딥러닝 통합 • Qlib 백테스팅 • 팩터 Zoo • Mega-Alpha 신호</p>
+        <p><strong>퀀트 투자 연구를 위한 전문적인 알파 팩터 생성 및 분석 플랫폼</strong></p>
+        <p>횡단면 순위 기반 팩터 • 딥러닝 통합 • IC/ICIR 분석 • 팩터 Zoo • 성능 검증</p>
         </div>
         """, unsafe_allow_html=True)
         st.markdown("---")
@@ -247,14 +247,14 @@ class AlphaForgeApp:
             ## 🎯 AlphaFactors란?
             
             **AlphaFactors**는 미국 주식 데이터를 기반으로 다양한 알파 팩터를 생성하고, 
-            Qlib과 연동하여 전문적인 포트폴리오 백테스팅을 제공하는 **퀀트 투자 연구 플랫폼**입니다.
+            IC/ICIR 분석을 통해 팩터 성능을 검증하는 **퀀트 투자 연구 플랫폼**입니다.
             
             ### ✨ 핵심 특징
             - 🎯 **진정한 알파 팩터**: 횡단면 순위 기반 팩터 생성 (실제 퀀트 투자 방식)
             - 🧠 **딥러닝 통합**: MLP, LSTM, Transformer 등 다양한 모델 지원
-            - 📊 **전문 백테스팅**: Qlib 기반 리스크 분석 및 성과 평가
+            - 📊 **성능 분석**: IC/ICIR 기반 팩터 예측력 분석 및 시각화
             - 🦁 **팩터 Zoo**: 실험 결과 저장/관리/재사용 시스템
-            - ⚡ **Mega-Alpha 신호**: 선형/비선형 팩터 동적 조합
+            - ⚡ **선형/비선형 비교**: 다양한 팩터 조합 및 성능 비교
             """)
             
             if current_step == 0:
@@ -275,10 +275,10 @@ class AlphaForgeApp:
                 - 결합 방식: "IC 기반 동적 가중치" 선택
                 - "🎯 알파 팩터 생성" 클릭
                 
-                **3️⃣ 백테스팅 (2분)**
-                - "Qlib 포트폴리오 백테스팅" 섹션으로 이동
-                - "📊 Qlib 백테스팅 실행" 클릭
-                - 결과 확인 및 분석
+                **3️⃣ 분석 및 저장**
+                - IC/ICIR 차트로 팩터 성능 확인
+                - 팩터 Zoo에 결과 저장
+                - 다른 팩터들과 성능 비교
                 """)
                 
                 st.markdown("""
@@ -349,60 +349,33 @@ class AlphaForgeApp:
                 
             elif current_step == 2:
                 st.success("✅ **2단계 완료**: 팩터 생성이 완료되었습니다!")
-                st.info("🎯 **다음 단계**: 백테스팅을 통해 실제 투자 성과를 확인해보세요!")
+                st.info("🎯 **다음 단계**: 팩터 성능을 분석하고 더 좋은 팩터를 개발해보세요!")
                 
                 st.markdown("""
-                ### 💡 백테스팅 가이드
+                ### 💡 팩터 분석 가이드
                 
-                **권장 설정 (초보자):**
-                - 🔄 **리밸런싱 주기**: 월간 (안정적, 거래 비용 절약)
-                - 💰 **거래 비용**: 0.1% (현실적인 수준)
-                - 📈 **최대 포지션**: 10% (분산 투자 효과)
-                - 📊 **전략**: Long-Only (롱 포지션만)
+                **성능 지표 해석:**
+                - 📊 **IC (Information Coefficient)**: 예측력 지표 (±0.05 이상이면 우수)
+                - 📈 **ICIR**: 안정성 지표 (0.5 이상이면 우수)
+                - 📊 **Rolling IC**: 시간에 따른 예측력 변화 분석
                 
-                **고급 설정:**
-                - 🔄 **리밸런싱**: 주간 (더 적극적, 높은 거래 비용)
-                - 💰 **거래 비용**: 0.05% (낮은 비용, 높은 빈도)
-                - 📈 **최대 포지션**: 5% (더 극단적 분산)
-                - 📊 **전략**: Long-Short (롱/숏 포지션)
+                **팩터 개선 방법:**
+                - 🔧 **파라미터 조정**: 기간, 임계값 등 최적화
+                - 🧠 **딥러닝 활용**: MLP, LSTM 등으로 비선형 패턴 포착
+                - ⚡ **팩터 조합**: 여러 팩터의 동적 가중치 결합
+                - 🦁 **팩터 Zoo**: 성과 좋은 팩터들 저장 및 재활용
                 
-                ### 📈 성과 지표 해석
+                ### 📈 팩터 성능 기준표
                 
                 | 지표 | 양호 | 우수 | 설명 |
                 |------|------|------|------|
-                | Sharpe Ratio | > 1.0 | > 1.5 | 위험 대비 수익률 |
                 | IC | > 0.02 | > 0.05 | 팩터 예측력 |
                 | ICIR | > 0.5 | > 1.0 | 예측력 안정성 |
-                | 최대 낙폭 | < 20% | < 10% | 최대 손실 폭 |
-                | Calmar Ratio | > 0.5 | > 1.0 | 수익률/최대낙폭 |
+                | Rolling IC 표준편차 | < 0.1 | < 0.05 | 예측력 일관성 |
+                | IC 양수 비율 | > 55% | > 60% | 안정적 예측력 |
+                | 팩터 분포 편향도 | < 0.5 | < 0.2 | 균형 잡힌 팩터 값 |
                 """)
                 
-            elif current_step == 3:
-                st.success("✅ **모든 단계 완료**: 전체 워크플로우가 완료되었습니다!")
-                st.info("🎯 **다음 단계**: 팩터 Zoo에서 다양한 실험을 해보거나, 선형/비선형 비교를 통해 더 나은 조합을 찾아보세요!")
-                
-                st.markdown("""
-                ### 💡 고급 분석 가이드
-                
-                **🦁 팩터 Zoo 활용법:**
-                - 📁 **저장**: 생성된 팩터는 자동으로 팩터 Zoo에 저장
-                - 🔍 **분석**: 저장된 팩터의 상세 성능 분석
-                - 🔄 **재사용**: 이전 실험 결과를 새로운 분석에 활용
-                - 🗑️ **정리**: 불필요한 팩터 삭제로 저장공간 관리
-                
-                **성과 비교:**
-                - 📊 **Rolling IC/ICIR**: 시계열별 예측력 변화 분석
-                - 📈 **백테스트 결과**: 누적 수익률, Sharpe, 최대낙폭 비교
-                - 🎯 **파라미터 최적화**: 다양한 설정으로 성과 개선
-                
-                **⚡ 선형/비선형 비교 및 Mega-Alpha 신호:**
-                - 📊 **선형 팩터**: 통계적/기술적 지표 (해석 가능)
-                - 🧠 **비선형 팩터**: 딥러닝 모델 (복잡한 패턴 포착)
-                - ⚖️ **성과 비교**: IC, ICIR, 백테스트 결과 병렬 비교
-                - 🔄 **동적 조합**: 두 팩터를 IC 기반으로 동적 가중치 조합
-                - 📈 **성능 향상**: 개별 팩터 대비 우수한 성과 기대
-                - 🎯 **실시간 분석**: 즉시 성과 분석 및 시각화
-                """)
             
             # 공통 도움말
             st.markdown("---")
@@ -419,10 +392,10 @@ class AlphaForgeApp:
             - ❌ **IC 계산 실패**: 충분한 데이터 확보 (최소 60일)
             - ❌ **메모리 부족**: 종목 수 줄이기 (10개 이하 권장)
             
-            **백테스팅 문제:**
-            - ❌ **Qlib 오류**: Qlib 데이터셋 설치 확인
-            - ❌ **팩터 형식 오류**: 팩터가 올바른 형식인지 확인
+            **분석 문제:**
+            - ❌ **IC 계산 오류**: 팩터가 올바른 형식인지 확인
             - ❌ **성과 지표 NaN**: 데이터 품질 및 기간 확인
+            - ❌ **메모리 부족**: 종목 수 줄이기 (10개 이하 권장)
             
             ### 📞 추가 지원
             - 💡 **도움말**: 각 섹션의 도움말(?) 아이콘 클릭
@@ -1055,12 +1028,7 @@ class AlphaForgeApp:
             - 팩터 성능 분석 및 검증 (IC, ICIR)
             - 팩터 Zoo에 자동 저장
             
-            **3단계: 백테스팅**
-            - Qlib 기반 포트폴리오 백테스팅
-            - 리스크 지표 및 수익률 분석
-            - 결과 시각화 및 리포트 생성
-            
-            **4단계: 고급 분석**
+            **3단계: 고급 분석**
             - 팩터 Zoo에서 다양한 실험
             - 선형/비선형 팩터 비교
             - Mega-Alpha 신호 생성 및 분석
@@ -1086,7 +1054,7 @@ class AlphaForgeApp:
             - ✅ IC 기반 과학적 팩터 결합
             - ✅ 업계 표준 성능 지표로 검증
             - ✅ 실제 헤지펀드에서 사용하는 정통 방법론
-            - ✅ 딥러닝 기반 백테스팅으로 더 유연하고 안정적인 성과 분석
+            - ✅ 딥러닝 기반 팩터 생성으로 더 유연하고 안정적인 성과 분석
             - ✅ 팩터 Zoo를 통한 실험 결과 관리 및 재사용
             - ✅ Mega-Alpha 신호로 선형/비선형 팩터 동적 조합
             """)
@@ -2116,70 +2084,63 @@ class AlphaForgeApp:
     
     def _render_detailed_performance_analysis(self, results: Dict[str, Any]):
         """상세 성과 분석 렌더링"""
-        backtest_results = results.get('backtest_results')
-        if not backtest_results:
-            st.warning("백테스팅 결과가 없습니다.")
+        factor_data = results.get('factor_data')
+        if factor_data is None:
+            st.warning("팩터 결과가 없습니다.")
             return
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("**📊 성과 지표 상세**")
-            metrics = backtest_results['performance_metrics']
+            st.markdown("**📊 팩터 성과 지표**")
             
-            detailed_metrics = {
-                '수익률 지표': {
-                    '총 수익률': f"{metrics['total_return']:.2%}",
-                    '연간 수익률': f"{metrics['annualized_return']:.2%}",
-                    '벤치마크 대비 초과수익': f"{metrics['excess_return']:.2%}"
-                },
-                '위험 지표': {
-                    '연간 변동성': f"{metrics['annualized_volatility']:.2%}",
-                    '최대 손실폭': f"{metrics['max_drawdown']:.2%}",
-                    '승률': f"{metrics['win_rate']:.2%}"
-                },
-                '비율 지표': {
-                    '샤프 비율': f"{metrics['sharpe_ratio']:.3f}",
-                    '정보 비율': f"{metrics['information_ratio']:.3f}",
-                    '칼마 비율': f"{metrics['calmar_ratio']:.3f}"
+            # IC 분석
+            ic_values = results.get('ic_values', {})
+            if ic_values:
+                ic_metrics = {
+                    'IC 지표': {
+                        '평균 IC': f"{ic_values.get('mean_ic', 0):.4f}",
+                        'IC 표준편차': f"{ic_values.get('std_ic', 0):.4f}",
+                        'ICIR': f"{ic_values.get('icir', 0):.4f}"
+                    },
+                    '팩터 통계': {
+                        '유효 데이터 수': f"{len(factor_data)}개",
+                        '팩터 평균': f"{factor_data.mean():.4f}",
+                        '팩터 표준편차': f"{factor_data.std():.4f}"
+                    }
                 }
-            }
-            
-            for category, metrics_dict in detailed_metrics.items():
-                st.markdown(f"**{category}**")
-                for metric, value in metrics_dict.items():
-                    st.write(f"• {metric}: {value}")
-                st.write("")
+                
+                for category, metrics_dict in ic_metrics.items():
+                    st.markdown(f"**{category}**")
+                    for metric, value in metrics_dict.items():
+                        st.write(f"• {metric}: {value}")
+                    st.write("")
         
         with col2:
-            st.markdown("**📈 월별 수익률 분포**")
+            st.markdown("**📈 팩터 분포 분석**")
             
-            returns = backtest_results['portfolio_returns']
-            monthly_returns = returns.resample('M').apply(lambda x: (1 + x).prod() - 1)
-            
-            if len(monthly_returns) > 0:
+            if len(factor_data) > 0:
                 fig, ax = plt.subplots(figsize=(8, 6))
-                monthly_returns.plot(kind='bar', ax=ax, color='steelblue', alpha=0.7)
-                ax.set_title('월별 수익률')
-                ax.set_ylabel('수익률')
-                ax.set_xlabel('월')
+                factor_data.hist(bins=50, ax=ax, alpha=0.7, color='steelblue')
+                ax.set_title('팩터 값 분포')
+                ax.set_ylabel('빈도')
+                ax.set_xlabel('팩터 값')
                 ax.grid(True, alpha=0.3)
-                plt.xticks(rotation=45)
                 plt.tight_layout()
                 st.pyplot(fig)
                 plt.close(fig)
                 
-                # 월별 통계
-                st.markdown("**월별 수익률 통계**")
-                monthly_stats = {
-                    '평균': f"{monthly_returns.mean():.2%}",
-                    '표준편차': f"{monthly_returns.std():.2%}",
-                    '최고': f"{monthly_returns.max():.2%}",
-                    '최저': f"{monthly_returns.min():.2%}",
-                    '양수 월 비율': f"{(monthly_returns > 0).mean():.1%}"
+                # 팩터 통계
+                st.markdown("**팩터 분포 통계**")
+                factor_stats = {
+                    '최솟값': f"{factor_data.min():.4f}",
+                    '25% 분위수': f"{factor_data.quantile(0.25):.4f}",
+                    '중앙값': f"{factor_data.median():.4f}",
+                    '75% 분위수': f"{factor_data.quantile(0.75):.4f}",
+                    '최댓값': f"{factor_data.max():.4f}"
                 }
                 
-                for stat, value in monthly_stats.items():
+                for stat, value in factor_stats.items():
                     st.write(f"• {stat}: {value}")
     
     def _render_factor_contribution_analysis(self, results: Dict[str, Any]):
@@ -2250,81 +2211,81 @@ class AlphaForgeApp:
         st.dataframe(factor_stats_df, use_container_width=True)
     
     def _render_risk_analysis(self, results: Dict[str, Any]):
-        """위험 분석 렌더링"""
-        backtest_results = results.get('backtest_results')
-        if not backtest_results:
-            st.warning("백테스팅 결과가 없습니다.")
+        """팩터 안정성 분석 렌더링"""
+        factor_data = results.get('factor_data')
+        if factor_data is None:
+            st.warning("팩터 결과가 없습니다.")
             return
         
-        returns = backtest_results['portfolio_returns']
-        cumulative = backtest_results['cumulative_returns']
+        ic_values = results.get('ic_values', {})
+        ic_series = ic_values.get('ic_series', pd.Series())
         
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("**📉 드로우다운 분석**")
+            st.markdown("**📉 IC 안정성 분석**")
             
-            # 드로우다운 계산
-            running_max = cumulative.expanding().max()
-            drawdown = (cumulative - running_max) / running_max
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            drawdown.plot(ax=ax, color='red', alpha=0.7)
-            ax.fill_between(drawdown.index, drawdown, 0, alpha=0.3, color='red')
-            ax.set_title('포트폴리오 드로우다운')
-            ax.set_ylabel('드로우다운 (%)')
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close(fig)
-            
-            # 드로우다운 통계
-            st.markdown("**드로우다운 통계**")
-            dd_stats = {
-                '최대 드로우다운': f"{drawdown.min():.2%}",
-                '평균 드로우다운': f"{drawdown[drawdown < 0].mean():.2%}",
-                '드로우다운 지속 기간': f"{(drawdown < -0.05).sum()}일",
-                '회복 기간 (추정)': f"{max(0, (drawdown < -0.01).sum() * 0.5):.0f}일"
-            }
-            
-            for stat, value in dd_stats.items():
-                st.write(f"• {stat}: {value}")
+            if len(ic_series) > 0:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ic_series.plot(ax=ax, color='steelblue', alpha=0.7)
+                ax.axhline(y=0, color='red', linestyle='--', alpha=0.5)
+                ax.set_title('IC 시계열')
+                ax.set_ylabel('IC 값')
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close(fig)
+                
+                # IC 통계
+                st.markdown("**IC 안정성 통계**")
+                ic_stats = {
+                    '평균 IC': f"{ic_series.mean():.4f}",
+                    'IC 표준편차': f"{ic_series.std():.4f}",
+                    '양수 IC 비율': f"{(ic_series > 0).mean():.1%}",
+                    'IC 최솟값': f"{ic_series.min():.4f}",
+                    'IC 최댓값': f"{ic_series.max():.4f}"
+                }
+                
+                for stat, value in ic_stats.items():
+                    st.write(f"• {stat}: {value}")
         
         with col2:
-            st.markdown("**📊 수익률 분포 분석**")
+            st.markdown("**📊 팩터 안정성 분석**")
             
-            # 수익률 히스토그램
-            fig, ax = plt.subplots(figsize=(8, 6))
-            returns.hist(bins=50, ax=ax, alpha=0.7, density=True, color='steelblue')
-            ax.axvline(returns.mean(), color='red', linestyle='--', 
-                      label=f'평균: {returns.mean():.4f}')
-            ax.axvline(returns.quantile(0.05), color='orange', linestyle='--', 
-                      label=f'5% VaR: {returns.quantile(0.05):.4f}')
-            ax.set_title('일별 수익률 분포')
-            ax.set_xlabel('일별 수익률')
-            ax.set_ylabel('확률 밀도')
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close(fig)
-            
-            # 위험 지표
-            st.markdown("**위험 지표**")
-            var_95 = returns.quantile(0.05)
-            skewness = returns.skew()
-            kurtosis = returns.kurtosis()
-            
-            risk_metrics = {
-                '일일 VaR (95%)': f"{var_95:.2%}",
-                '연환산 VaR': f"{var_95 * np.sqrt(252):.2%}",
-                '왜도 (Skewness)': f"{skewness:.3f}",
-                '첨도 (Kurtosis)': f"{kurtosis:.3f}",
-                '하방 편차': f"{returns[returns < 0].std() * np.sqrt(252):.2%}"
-            }
-            
-            for metric, value in risk_metrics.items():
-                st.write(f"• {metric}: {value}")
+            if len(factor_data) > 0:
+                # 팩터 안정성 히스토그램
+                fig, ax = plt.subplots(figsize=(8, 6))
+                factor_data.hist(bins=50, ax=ax, alpha=0.7, density=True, color='lightgreen')
+                ax.axvline(factor_data.mean(), color='red', linestyle='--', 
+                          label=f'평균: {factor_data.mean():.4f}')
+                ax.axvline(factor_data.quantile(0.05), color='orange', linestyle='--', 
+                          label=f'5% 분위수: {factor_data.quantile(0.05):.4f}')
+                ax.set_title('팩터 값 분포')
+                ax.set_xlabel('팩터 값')
+                ax.set_ylabel('확률 밀도')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close(fig)
+                
+                # 팩터 안정성 지표
+                st.markdown("**팩터 안정성 지표**")
+                factor_q95 = factor_data.quantile(0.95)
+                factor_q05 = factor_data.quantile(0.05)
+                factor_skew = factor_data.skew()
+                factor_kurtosis = factor_data.kurtosis()
+                
+                stability_metrics = {
+                    '팩터 범위': f"{factor_q05:.4f} ~ {factor_q95:.4f}",
+                    '팩터 분산': f"{factor_data.var():.4f}",
+                    '왜도': f"{factor_skew:.3f}",
+                    '첨도': f"{factor_kurtosis:.3f}",
+                    '이상치 비율': f"{((factor_data > factor_q95) | (factor_data < factor_q05)).mean():.1%}"
+                }
+                
+                for metric, value in stability_metrics.items():
+                    st.write(f"• {metric}: {value}")
 
 # 애플리케이션 실행
 if __name__ == "__main__":
