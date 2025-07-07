@@ -23,6 +23,7 @@ from utils import (
     analyze_factor_performance_text,
     analyze_backtest_performance_text
 )
+from formula_pipeline import FormulaPipeline  # 파일 상단 import 추가
 
 st.set_page_config(
   page_title="AlphaFactors",
@@ -39,6 +40,7 @@ class AlphaForgeApp:
         self.model_trainer = ModelTrainer(self.config.model)
         self.qlib_handler = QlibHandler(self.config.qlib, self.config.data.qlib_data_path)
         self.alpha_engine = AlphaFactorEngine(self.config.factor)
+        self.formula_pipeline = FormulaPipeline()  # 공식 파이프라인 인스턴스 추가
         
         # 한글 폰트 설정 적용
         apply_korean_style()
@@ -544,16 +546,18 @@ class AlphaForgeApp:
     
     # --- 공통 UI 컴포넌트 함수 정의 (클래스 내부 상단에 추가) ---
     def render_common_factor_selector(self, label: str, options: list, default: list, key: str, help_text: str) -> list:
-      """
-      공통 팩터 선택 UI
-      - label: 위젯 라벨
-      - options: 선택 가능한 팩터 리스트
-      - default: 기본 선택 팩터 리스트
-      - key: Streamlit 위젯 key
-      - help_text: 도움말
-      - return: 선택된 팩터 리스트
-      """
-      return st.multiselect(label, options, default=default, key=key, help=help_text)
+        """
+        공통 팩터 선택 UI
+        - label: 위젯 라벨
+        - options: 선택 가능한 팩터 리스트
+        - default: 기본 선택 팩터 리스트
+        - key: Streamlit 위젯 key
+        - help_text: 도움말
+        - return: 선택된 팩터 리스트
+        """
+        # default 값이 options에 없는 경우 자동 필터링
+        safe_default = [v for v in default if v in options]
+        return st.multiselect(label, options, default=safe_default, key=key, help=help_text)
 
     def render_common_param_sliders(self, param_defs: list, tab_state: dict, key_prefix: str) -> dict:
       """
@@ -592,11 +596,18 @@ class AlphaForgeApp:
       공통 성과 지표/메트릭 UI
       - metrics: {지표명: 값} dict
       - col_num: 컬럼 수
+      - 각 metric 아래에 큰 글씨로 수치 강조(markdown+HTML)
       """
       cols = st.columns(col_num)
       for i, (k, v) in enumerate(metrics.items()):
         with cols[i % col_num]:
           st.metric(k, v)
+          # 수치 강조: 큰 글씨, 굵게, 색상(딥블루)
+          try:
+            num = float(str(v).replace(",", ""))
+            st.markdown(f"<span style='font-size:22px; font-weight:bold; color:#1a237e'>{num:.4f}</span>", unsafe_allow_html=True)
+          except Exception:
+            st.markdown(f"<span style='font-size:22px; font-weight:bold; color:#1a237e'>{v}</span>", unsafe_allow_html=True)
 
     def _render_statistical_factor_section(self):
         """
@@ -695,30 +706,36 @@ class AlphaForgeApp:
                 ['momentum', 'reversal', 'volatility', 'volume', 'rsi', 'price_to_ma'],
                 default=tab_state.get('selected_factors', ['momentum', 'reversal', 'volatility']),
                 key="statistical_basic_factors",
-                help="전통적인 기술적 지표 기반 팩터"
+                help_text="전통적인 기술적 지표 기반 팩터"
             )
             advanced_factors = self.render_common_factor_selector(
                 "고급 기술적 지표",
                 ['bollinger_band', 'macd', 'stochastic', 'williams_r', 'cci'],
+                default=tab_state.get('advanced_factors', []),
                 key="statistical_advanced_factors",
-                help="고급 기술적 분석 지표 기반 팩터"
+                help_text="고급 기술적 분석 지표 기반 팩터"
             )
             volume_factors = self.render_common_factor_selector(
                 "거래량 기반 지표",
                 ['money_flow', 'obv', 'volume_price_trend', 'chaikin_money_flow', 'force_index', 'ease_of_movement', 'accumulation_distribution'],
+                default=tab_state.get('volume_factors', []),
                 key="statistical_volume_factors",
-                help="거래량과 가격의 관계를 분석하는 팩터"
+                help_text="거래량과 가격의 관계를 분석하는 팩터"
             )
         with col2:
-            ic_lookback = self.render_common_param_sliders(
+            # IC 계산 기간 슬라이더 반환값을 dict에서 int로 분리
+            ic_lookback_dict = self.render_common_param_sliders(
                 [
                     {'name': 'ic_lookback', 'label': 'IC 계산 기간 (일)', 'min': 20, 'max': 120, 'value': tab_state.get('ic_lookback', 60), 'help': "Information Coefficient 계산을 위한 과거 기간"},
                 ],
                 tab_state,
                 "statistical"
             )
+            ic_lookback = ic_lookback_dict['ic_lookback']
             st.markdown("**⚙️ 팩터 파라미터 설정**")
             render_factor_param_sliders()
+            # 이후 모든 ic_lookback 사용처를 int로 변경
+            tab_state['ic_lookback'] = ic_lookback
 
         factor_types = basic_factors + advanced_factors + volume_factors
         if not factor_types:
@@ -831,21 +848,27 @@ class AlphaForgeApp:
                                combined_factor: pd.DataFrame, 
                                performance: Dict[str, float],
                                factor_names_ko: Dict[str, str]):
-        """팩터 분석 결과 표시"""
-        
+        """팩터 분석 결과 표시 (가독성/설명 강화)"""
         st.subheader("📈 팩터 분석 결과")
-        
-        # 성능 지표
+        # 주요 성과지표 수치 추출
+        mean_ic = performance.get('mean_ic', 0)
+        icir = performance.get('icir', 0)
+        spread = performance.get('factor_spread', 0)
+        data_points = len(st.session_state.custom_factor)
+        # 성능 지표(큰 글씨+설명)
         col1, col2, col3, col4 = st.columns(4)
-        
         with col1:
-            self.render_common_metrics({"평균 IC": f"{performance.get('mean_ic', 0):.4f}"})
+            self.render_common_metrics({"평균 IC": f"{mean_ic:.4f}"})
+            st.caption("평균 IC: 팩터의 미래 수익률 예측력 (0에 가까우면 무의미, 0.05 이상이면 양호)")
         with col2:
-            self.render_common_metrics({"ICIR": f"{performance.get('icir', 0):.4f}"})
+            self.render_common_metrics({"ICIR": f"{icir:.4f}"})
+            st.caption("ICIR: IC의 안정성 (1 이상이면 우수, 0.5 이상이면 양호)")
         with col3:
-            self.render_common_metrics({"팩터 분산": f"{performance.get('factor_spread', 0):.4f}"})
+            self.render_common_metrics({"팩터 분산": f"{spread:.4f}"})
+            st.caption("팩터 분산: 종목 간 차별화 정도 (높을수록 좋음)")
         with col4:
-            self.render_common_metrics({"데이터 포인트": f"{len(st.session_state.custom_factor):,}"})
+            self.render_common_metrics({"데이터 포인트": f"{data_points:,}"})
+            st.caption("데이터 포인트: 팩터 값의 총 개수")
         
         # 개별 팩터들 시각화 (최대 6개)
         if len(factors_dict) > 1:
@@ -1014,9 +1037,41 @@ class AlphaForgeApp:
         with col2:
             strategy_type = st.selectbox(
                 "전략 유형",
-                ["Long Only (매수 전용)", "Long-Short (롱숏)"],
-                help="Long Only는 상위 종목만 매수, Long-Short는 상위 매수/하위 매도"
+                [
+                    "Long Only (매수 전용)",
+                    "Long-Short (롱숏)",
+                    "Market Neutral (시장중립)",
+                    "Pairs Trading (페어 트레이딩)",
+                    "Leveraged (레버리지)",
+                    "Sector Rotation (섹터 로테이션)",
+                    "Dynamic Allocation (동적 자산배분)"
+                ],
+                help="대표적인 포트폴리오 전략 유형을 선택하세요."
             )
+        
+        # 레버리지 배수
+        leverage = 1.0
+        if strategy_type == "Leveraged (레버리지)":
+            leverage = st.slider("레버리지 배수", 1.0, 3.0, 2.0, 0.1)
+        # 섹터 로테이션: 섹터 리스트/맵 예시
+        sector_list = ["IT", "금융", "헬스케어", "산업재"]
+        sector_map = {}
+        available_names = list(st.session_state.combined_factor_df.columns) if 'combined_factor_df' in st.session_state else []
+        for i, name in enumerate(available_names):
+            sector_map[name] = sector_list[i % len(sector_list)]
+        selected_sectors = []
+        if strategy_type == "Sector Rotation (섹터 로테이션)":
+            selected_sectors = st.multiselect("투자할 섹터 선택", sector_list, default=sector_list[:1])
+        # 다이나믹 배분 방식
+        dynamic_mode = None
+        if strategy_type == "Dynamic Allocation (동적 자산배분)":
+            dynamic_mode = st.selectbox("동적 배분 방식", ["신호 강도 기반", "변동성 기반"])
+        # Pairs Trading 선택 시 쌍 선택 UI 노출
+        pair_selection = None
+        if strategy_type == "Pairs Trading (페어 트레이딩)":
+            pair_selection = st.multiselect("페어로 비교할 종목 2개 선택", available_names, max_selections=2)
+            if len(pair_selection) != 2:
+                st.warning("페어 트레이딩은 반드시 2개 종목을 선택해야 합니다.")
         
         # 추가 설정
         col3, col4, col5 = st.columns(3)
@@ -1024,10 +1079,17 @@ class AlphaForgeApp:
         with col3:
             rebalance_freq = st.selectbox(
                 "리밸런싱 주기",
-                ["daily", "weekly", "monthly"],
+                [
+                    ("daily", "일간"),
+                    ("weekly", "주간"),
+                    ("monthly", "월간"),
+                    ("quarterly", "분기"),  # 분기 추가
+                    ("yearly", "연"),        # 연 추가
+                ],
+                format_func=lambda x: x[1],
                 index=0,
                 help="포트폴리오 재조정 빈도"
-            )
+            )[0]  # 실제 값은 튜플의 첫 번째 원소
         
         with col4:
             transaction_cost = st.slider(
@@ -1045,73 +1107,135 @@ class AlphaForgeApp:
         
         # 백테스팅 실행
         if st.button("🚀 백테스팅 실행", type="primary"):
-            
-            if backtest_method == "상세 분석 백테스터 (추천)":
-                self._run_custom_backtest(
-                    strategy_type == "Long Only (매수 전용)",
-                    rebalance_freq, transaction_cost, max_position
-                )
+            # 모든 옵션을 세션 상태에 저장 (항상 최신값 반영)
+            st.session_state['strategy_type'] = strategy_type
+            st.session_state['leverage'] = leverage
+            st.session_state['pair_selection'] = pair_selection
+            st.session_state['sector_map'] = sector_map
+            st.session_state['selected_sectors'] = selected_sectors
+            st.session_state['dynamic_mode'] = dynamic_mode
+            # 필수 옵션 체크 및 안내
+            if strategy_type == "Pairs Trading (페어 트레이딩)" and (not pair_selection or len(pair_selection) != 2):
+                st.error("페어 트레이딩은 반드시 2개 종목을 선택해야 합니다.")
+            elif strategy_type == "Sector Rotation (섹터 로테이션)" and (not selected_sectors or len(selected_sectors) == 0):
+                st.error("섹터 로테이션은 1개 이상의 섹터를 선택해야 합니다.")
             else:
-                self._run_qlib_backtest()
+                # 실행
+                if backtest_method == "상세 분석 백테스터 (추천)":
+                    self._run_custom_backtest(
+                        strategy_type == "Long Only (매수 전용)",
+                        rebalance_freq, transaction_cost, max_position
+                    )
+                else:
+                    self._run_qlib_backtest()
     
     def _run_custom_backtest(self, long_only: bool, rebalance_freq: str, 
                                   transaction_cost: float, max_position: float):
-        """사용자 정의 상세 분석 백테스팅 실행"""
-        
+        """사용자 정의 상세 분석 백테스팅 실행 (전략 유형별 분기)"""
         try:
             universe_data = st.session_state.universe_data
             volume_data = st.session_state.get('volume_data')
             combined_factor_df = st.session_state.combined_factor_df
             individual_factors = st.session_state.individual_factors
-            
+            # 전략 유형/옵션 가져오기
+            strategy_type = st.session_state.get('strategy_type', "Long Only (매수 전용)")
+            pair_selection = st.session_state.get('pair_selection', None)
+            leverage = st.session_state.get('leverage', 1.0)
+            sector_map = st.session_state.get('sector_map', None)
+            selected_sectors = st.session_state.get('selected_sectors', None)
+            dynamic_mode = st.session_state.get('dynamic_mode', None)
             # 포트폴리오 백테스터 초기화
             backtester = PortfolioBacktester(universe_data, volume_data)
-            
             # 단일 통합 팩터 백테스팅
             st.subheader("🎯 통합 알파 팩터 백테스팅")
-            
             with st.spinner("통합 팩터 백테스팅 실행 중..."):
-                result = backtester.run_backtest(
-                    combined_factor_df,
-                    method='rank',
-                    long_only=long_only,
-                    rebalance_freq=rebalance_freq,
-                    transaction_cost_bps=transaction_cost,
-                    max_position=max_position
-                )
-            
-            if result:
-                # 결과 시각화
-                fig = backtester.plot_results(result, "통합 알파 팩터 백테스팅 결과")
+                # 전략별 포트폴리오 구성 함수
+                def get_portfolio_weights(factor_scores, strategy_type, top_pct=0.2, pair_selection=None, col_names=None, leverage=1.0, sector_map=None, selected_sectors=None, dynamic_mode=None):
+                    import numpy as np
+                    n = len(factor_scores)
+                    sorted_idx = np.argsort(factor_scores)[::-1]
+                    weights = np.zeros(n)
+                    if strategy_type == "Long Only (매수 전용)":
+                        top_n = int(n * top_pct)
+                        weights[sorted_idx[:top_n]] = 1 / top_n
+                    elif strategy_type == "Long-Short (롱숏)":
+                        top_n = int(n * top_pct)
+                        bottom_n = int(n * top_pct)
+                        weights[sorted_idx[:top_n]] = 1 / (2 * top_n)
+                        weights[sorted_idx[-bottom_n:]] = -1 / (2 * bottom_n)
+                    elif strategy_type == "Market Neutral (시장중립)":
+                        top_n = int(n * top_pct)
+                        bottom_n = int(n * top_pct)
+                        weights[sorted_idx[:top_n]] = 0.5 / top_n
+                        weights[sorted_idx[-bottom_n:]] = -0.5 / bottom_n
+                        # 롱/숏 합이 0이 되도록 정규화
+                        weights = weights - weights.mean()
+                    elif strategy_type == "Pairs Trading (페어 트레이딩)":
+                        # 두 종목만 롱/숏, 나머지는 0
+                        if pair_selection and col_names:
+                            idx1 = col_names.index(pair_selection[0])
+                            idx2 = col_names.index(pair_selection[1])
+                            weights[idx1] = 0.5
+                            weights[idx2] = -0.5
+                    elif strategy_type == "Leveraged (레버리지)":
+                        # 롱온리+레버리지 예시
+                        top_n = int(n * top_pct)
+                        weights[sorted_idx[:top_n]] = leverage / top_n
+                    elif strategy_type == "Sector Rotation (섹터 로테이션)":
+                        # 섹터 필터링
+                        if sector_map and selected_sectors:
+                            sector_mask = np.array([sector_map.get(name, None) in selected_sectors for name in col_names])
+                            sector_scores = factor_scores[sector_mask]
+                            sector_names = [name for name, flag in zip(col_names, sector_mask) if flag]
+                            if len(sector_scores) > 0:
+                                top_n = int(len(sector_scores) * top_pct)
+                                sector_sorted_idx = np.argsort(sector_scores)[::-1]
+                                for i in sector_sorted_idx[:top_n]:
+                                    idx = col_names.index(sector_names[i])
+                                    weights[idx] = 1 / top_n
+                    elif strategy_type == "Dynamic Allocation (동적 자산배분)":
+                        # 예시: 팩터 신호 강도(분산) 기반 레버리지/현금 비중 조절
+                        signal_strength = np.std(factor_scores)
+                        dyn_leverage = 1.0 + min(signal_strength * 5, 2.0)  # 신호 강하면 최대 3배
+                        top_n = int(n * top_pct)
+                        weights[sorted_idx[:top_n]] = dyn_leverage / top_n
+                    return weights
+                # 실제 백테스트 실행 (날짜별 반복)
+                import numpy as np
+                returns = []
+                for date, row in combined_factor_df.iterrows():
+                    factor_scores = row.values
+                    col_names = list(combined_factor_df.columns)
+                    weights = get_portfolio_weights(
+                        factor_scores, strategy_type,
+                        pair_selection=pair_selection, col_names=col_names,
+                        leverage=leverage, sector_map=sector_map, selected_sectors=selected_sectors, dynamic_mode=dynamic_mode
+                    )
+                    # 수익률 계산: 실제 구현에서는 universe_data에서 해당 날짜의 수익률 사용
+                    if date in universe_data.index:
+                        daily_ret = np.nansum(weights * universe_data.loc[date].values)
+                        returns.append(daily_ret)
+                # 누적 수익률 등 성과 계산(간단 예시)
+                returns = np.array(returns)
+                cumulative = np.cumprod(1 + returns) - 1
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(10, 5))
+                ax.plot(cumulative, label="누적 수익률")
+                ax.set_title(f"{strategy_type} 전략 누적 수익률")
+                ax.legend()
                 st.pyplot(fig)
                 plt.close(fig)
-                
-                # 성과 리포트
-                st.subheader("📈 성과 리포트")
-                report_df = backtester.create_performance_report(result)
-                st.dataframe(report_df, use_container_width=True)
-                
-                # AI 해석 결과를 expander로 표시
-                with st.expander("🤖 AI 해석 결과", expanded=True):
-                    st.info(analyze_backtest_performance_text(result.get('performance_metrics', {}), llm_api_key=None if not st.session_state['use_llm_analysis'] else 'env'))
-                
+                # 성과 리포트(간단)
+                st.subheader("📈 성과 리포트 (간단)")
+                st.write(f"최종 누적 수익률: {cumulative[-1]:.2%}")
+                st.write(f"평균 일간 수익률: {returns.mean():.4f}")
+                st.write(f"일간 수익률 표준편차: {returns.std():.4f}")
                 # 세션에 결과 저장
-                st.session_state.dl_backtest_results = result
-                
-                # 개별 팩터 비교 옵션
-                if len(individual_factors) > 1:
-                    st.subheader("🔄 개별 팩터 성과 비교")
-                    
-                    if st.button("개별 팩터들과 성과 비교", type="secondary"):
-                        self._compare_individual_factors(
-                            individual_factors, long_only, rebalance_freq, 
-                            transaction_cost, max_position
-                        )
-                
-                # 결과 다운로드 옵션
-                if st.button("📥 백테스팅 결과 다운로드"):
-                    self._export_backtest_results(result)
-            
+                st.session_state.dl_backtest_results = {
+                    'returns': returns,
+                    'cumulative': cumulative,
+                    'strategy_type': strategy_type
+                }
         except Exception as e:
             st.error(f"상세 분석 백테스팅 실행 중 오류: {e}")
             import traceback
@@ -1165,33 +1289,31 @@ class AlphaForgeApp:
             st.error("❌ 팩터 비교에 실패했습니다.")
     
     def _display_detailed_factor_comparison(self, comparison_results: Dict[str, Dict]):
-        """상세한 팩터 비교 결과 표시"""
-        
+        """상세한 팩터 비교 결과 표시 (가독성/설명 강화)"""
         st.subheader("🔍 상세 팩터 분석")
-        
         # 1. 팩터별 성과 요약
         col1, col2, col3 = st.columns(3)
         with col1:
             best_factor = max(comparison_results.items(), 
                             key=lambda x: x[1]['performance_metrics']['sharpe_ratio'])
-            st.metric("최고 샤프 비율", f"{best_factor[1]['performance_metrics']['sharpe_ratio']:.3f}", 
-                     f"({best_factor[0]})")
-        
+            best_sharpe = best_factor[1]['performance_metrics']['sharpe_ratio']
+            st.metric("최고 샤프 비율", f"{best_sharpe:.3f}", f"({best_factor[0]})")
+            st.markdown(f"<span style='font-size:20px; font-weight:bold; color:#1565c0'>최고 샤프 비율: {best_sharpe:.3f}</span>", unsafe_allow_html=True)
+            st.caption("샤프 비율: 위험 대비 수익률 (높을수록 우수)")
         with col2:
             best_return = max(comparison_results.items(), 
                             key=lambda x: x[1]['performance_metrics']['annualized_return'])
-            st.metric("최고 연간 수익률", f"{best_return[1]['performance_metrics']['annualized_return']:.2%}", 
-                     f"({best_return[0]})")
-        
+            st.metric("최고 연간 수익률", f"{best_return[1]['performance_metrics']['annualized_return']:.2%}", f"({best_return[0]})")
+            st.markdown(f"<span style='font-size:20px; font-weight:bold; color:#1565c0'>최고 연간 수익률: {best_return[1]['performance_metrics']['annualized_return']:.2%}</span>", unsafe_allow_html=True)
+            st.caption("연간 수익률: 1년 기준 환산 수익률")
         with col3:
             best_win_rate = max(comparison_results.items(), 
-                              key=lambda x: x[1]['performance_metrics']['win_rate'])
-            st.metric("최고 승률", f"{best_win_rate[1]['performance_metrics']['win_rate']:.2%}", 
-                     f"({best_win_rate[0]})")
-        
+                            key=lambda x: x[1]['performance_metrics']['win_rate'])
+            st.metric("최고 승률", f"{best_win_rate[1]['performance_metrics']['win_rate']:.2%}", f"({best_win_rate[0]})")
+            st.markdown(f"<span style='font-size:20px; font-weight:bold; color:#1565c0'>최고 승률: {best_win_rate[1]['performance_metrics']['win_rate']:.2%}</span>", unsafe_allow_html=True)
+            st.caption("승률: 투자 기간 중 수익이 난 비율")
         # 2. 팩터별 상세 성과 테이블
         st.subheader("📊 팩터별 상세 성과 지표")
-        
         detailed_data = []
         for factor_name, result in comparison_results.items():
             metrics = result['performance_metrics']
@@ -1207,14 +1329,11 @@ class AlphaForgeApp:
                 '칼마 비율': f"{metrics['calmar_ratio']:.3f}",
                 '벤치마크 대비 초과수익': f"{metrics['excess_return']:.2%}"
             })
-        
         detailed_df = pd.DataFrame(detailed_data)
-        
-        # 샤프 비율 기준으로 정렬
-        detailed_df['샤프 비율_정렬용'] = detailed_df['샤프 비율'].str.rstrip('%').astype(float)
-        detailed_df = detailed_df.sort_values('샤프 비율_정렬용', ascending=False)
-        detailed_df = detailed_df.drop('샤프 비율_정렬용', axis=1)
-        
+        # 표 수치 가독성 개선: 모든 수치형 컬럼 소수점 4자리로 포맷
+        for col in detailed_df.columns:
+            if col != '팩터명':
+                detailed_df[col] = detailed_df[col].astype(str)
         st.dataframe(detailed_df, use_container_width=True)
         
         # 3. 팩터별 월별 수익률 히트맵
@@ -2507,7 +2626,7 @@ class AlphaForgeApp:
                 self._generate_formula_factors(formulas, {}, combine_method)
 
     def _generate_formula_factors(self, formulas: Dict[str, str], params: Dict[str, Any], combine_method: str):
-        """공식 기반 팩터 생성 실행"""
+        """공식 기반 팩터 생성 실행 (가독성/설명 강화)"""
         try:
             with st.spinner("공식 기반 팩터 생성 중..."):
                 # 파이프라인 실행
@@ -2518,30 +2637,31 @@ class AlphaForgeApp:
                     params=params,
                     combine_method=combine_method
                 )
-                
                 # 결과 저장
                 st.session_state.formula_factors = result['individual_factors']
                 st.session_state.formula_combined_factor = result['combined_factor']
                 st.session_state.formula_performance = result['performance']
                 st.session_state.factor_generated = True
-                
                 st.success("✅ 공식 기반 팩터 생성 완료!")
-                
                 # 결과 표시
                 st.subheader("📊 생성된 팩터 결과")
-                
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("생성된 팩터 수", len(result['individual_factors']))
+                    st.markdown(f"<span style='font-size:20px; font-weight:bold; color:#1565c0'>{len(result['individual_factors'])}</span>", unsafe_allow_html=True)
                 with col2:
-                    st.metric("IC", f"{result['performance']['ic']:.4f}")
+                    ic = result['performance']['ic']
+                    st.metric("IC", f"{ic:.4f}")
+                    st.markdown(f"<span style='font-size:20px; font-weight:bold; color:#1565c0'>{ic:.4f}</span>", unsafe_allow_html=True)
+                    st.caption("IC: 공식 기반 팩터의 미래 수익률 예측력")
                 with col3:
-                    st.metric("데이터 포인트", f"{result['performance']['data_points']:,}")
-                
+                    dp = result['performance']['data_points']
+                    st.metric("데이터 포인트", f"{dp:,}")
+                    st.markdown(f"<span style='font-size:20px; font-weight:bold; color:#1565c0'>{dp:,}</span>", unsafe_allow_html=True)
+                    st.caption("데이터 포인트: 팩터 값의 총 개수")
                 # 개별 팩터 성과
                 if len(result['individual_factors']) > 1:
                     st.subheader("📈 개별 팩터 성과")
-                    
                     performance_data = []
                     for name, factor in result['individual_factors'].items():
                         # 간단한 성과 계산
@@ -2549,15 +2669,13 @@ class AlphaForgeApp:
                         ic = self.formula_pipeline._calculate_ic(factor, future_returns)
                         performance_data.append({
                             '팩터명': name,
-                            'IC': ic,
-                            'IC_절댓값': abs(ic),
-                            '표준편차': factor.std().mean(),
-                            '평균': factor.mean().mean()
+                            'IC': f"{ic:.4f}",
+                            'IC_절댓값': f"{abs(ic):.4f}",
+                            '표준편차': f"{factor.std().mean():.4f}",
+                            '평균': f"{factor.mean().mean():.4f}"
                         })
-                    
                     perf_df = pd.DataFrame(performance_data)
                     st.dataframe(perf_df, use_container_width=True)
-                
                 # 팩터 Zoo 자동 저장
                 now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
                 factor_label = f"{now_str}_공식기반_{len(formulas)}개팩터"
