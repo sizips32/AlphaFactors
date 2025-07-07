@@ -1888,7 +1888,9 @@ class AlphaForgeApp:
                     y_train = np.concatenate(all_y)
                 st.success(f"✅ 총 {len(X_train)}개의 학습 데이터 생성 완료")
                 # 모델 학습
-                self.model_trainer = ModelTrainer(self.config.model, model_type=model_type[0])
+                # 선택된 모델 타입으로 config 업데이트
+                self.config.model.model_type = model_type[0]
+                self.model_trainer = ModelTrainer(self.config.model)
                 trained_model = self.model_trainer.train_model(X_train, y_train)
                 if trained_model:
                     st.success("✅ 딥러닝 모델 학습 완료!")

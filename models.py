@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import streamlit as st
-from typing import Tuple, List, Dict, Type
+from typing import Tuple, List, Dict, Type, Any
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
@@ -151,9 +151,17 @@ class CNN1DFactorModel(BaseFactorModel):
         self._initialize_weights()
 
     def forward(self, x):
-        # (batch, seq_len, features) -> (batch, 1, seq_len * features)
         batch_size = x.size(0)
-        x = x.view(batch_size, 1, -1)
+        
+        # 입력 차원에 따라 처리 방식 결정
+        if x.dim() == 2:
+            # 2D input (batch, features) -> (batch, 1, features)
+            x = x.unsqueeze(1)
+        elif x.dim() == 3:
+            # 3D input (batch, seq_len, features) -> (batch, 1, seq_len * features)
+            x = x.view(batch_size, 1, -1)
+        else:
+            raise ValueError(f"Unexpected input dimensions: {x.shape}")
         
         x = self.conv_layers(x)
         x = self.adaptive_pool(x)
@@ -195,12 +203,25 @@ class HybridFactorModel(BaseFactorModel):
     def forward(self, x):
         batch_size = x.size(0)
         
-        # LSTM 분기
-        lstm_out, _ = self.lstm(x)
+        # LSTM 분기 (3D input 필요)
+        if x.dim() == 2:
+            # 2D input을 3D로 변환
+            x_lstm = x.unsqueeze(1)
+        else:
+            x_lstm = x
+        lstm_out, _ = self.lstm(x_lstm)
         lstm_features = lstm_out[:, -1, :]
         
-        # CNN 분기
-        cnn_input = x.view(batch_size, 1, -1)
+        # CNN 분기 (1D Conv를 위한 처리)
+        if x.dim() == 2:
+            # 2D input (batch, features) -> (batch, 1, features)
+            cnn_input = x.unsqueeze(1)
+        elif x.dim() == 3:
+            # 3D input (batch, seq_len, features) -> (batch, 1, seq_len * features)
+            cnn_input = x.view(batch_size, 1, -1)
+        else:
+            raise ValueError(f"Unexpected input dimensions: {x.shape}")
+        
         cnn_out = self.conv1d(cnn_input)
         cnn_out = self.bn(cnn_out)
         cnn_out = torch.relu(cnn_out)
@@ -242,11 +263,24 @@ class ModelTrainer:
         X_val_scaled = self.scaler.transform(X_val)
 
         # 시계열 모델을 위한 3D 텐서 변환
-        if self.config.model_type in ["lstm", "gru", "transformer", "cnn1d", "hybrid"]:
-            # (샘플 수, 특징 수) -> (샘플 수, 윈도우 크기, 특징 수)
-            # 이 예제에서는 윈도우가 이미 데이터에 적용되었다고 가정하고, 차원만 추가합니다.
-            X_train_scaled = X_train_scaled[:, np.newaxis, :]
-            X_val_scaled = X_val_scaled[:, np.newaxis, :]
+        if self.config.model_type in ["lstm", "gru", "transformer", "hybrid"]:
+            # (샘플 수, 특징 수) -> (샘플 수, 윈도우 크기, 특징별 특징 수)
+            # 윈도우 크기를 추정 (feature 수를 window_size로 나눔)
+            features_per_timestep = X_train_scaled.shape[1] // self.config.window_size
+            if features_per_timestep == 0:
+                features_per_timestep = 1
+            
+            # 3D로 reshape
+            try:
+                X_train_scaled = X_train_scaled.reshape(-1, self.config.window_size, features_per_timestep)
+                X_val_scaled = X_val_scaled.reshape(-1, self.config.window_size, features_per_timestep)
+            except ValueError:
+                # reshape 실패시 단순히 차원 추가
+                X_train_scaled = X_train_scaled[:, np.newaxis, :]
+                X_val_scaled = X_val_scaled[:, np.newaxis, :]
+        elif self.config.model_type == "cnn1d":
+            # CNN1D는 2D input을 유지 (batch_size, features)
+            pass
 
         train_dataset = torch.utils.data.TensorDataset(
             torch.tensor(X_train_scaled, dtype=torch.float32),
@@ -343,11 +377,100 @@ class ModelTrainer:
         self.model.eval()
         X_scaled = self.scaler.transform(X)
         
-        if self.config.model_type in ["lstm", "gru", "transformer", "cnn1d", "hybrid"]:
-            X_scaled = X_scaled[:, np.newaxis, :]
+        if self.config.model_type in ["lstm", "gru", "transformer", "hybrid"]:
+            # 학습 시와 동일한 방식으로 reshape
+            features_per_timestep = X_scaled.shape[1] // self.config.window_size
+            if features_per_timestep == 0:
+                features_per_timestep = 1
+            
+            try:
+                X_scaled = X_scaled.reshape(-1, self.config.window_size, features_per_timestep)
+            except ValueError:
+                X_scaled = X_scaled[:, np.newaxis, :]
+        elif self.config.model_type == "cnn1d":
+            # CNN1D는 2D input을 유지
+            pass
 
         X_tensor = torch.tensor(X_scaled, dtype=torch.float32).to(self.device)
         with torch.no_grad():
             return self.model(X_tensor).cpu().numpy().flatten()
 
-    # ... (get_model_summary, save_model, load_model 등 나머지 함수는 기존과 유사하게 유지) ...
+    def get_model_summary(self) -> Dict[str, Any]:
+        """모델 정보 요약 반환"""
+        if self.model is None:
+            return {"error": "모델이 학습되지 않았습니다."}
+        
+        total_params = sum(p.numel() for p in self.model.parameters())
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        
+        summary = {
+            "model_type": self.config.model_type,
+            "total_parameters": total_params,
+            "trainable_parameters": trainable_params,
+            "device": str(self.device),
+            "input_dim": getattr(self.model, 'input_dim', 'Unknown'),
+            "hidden_dims": [self.config.hidden_dim_1, self.config.hidden_dim_2],
+            "learning_rate": self.config.learning_rate,
+            "dropout_rate": self.config.dropout_rate
+        }
+        
+        # 모델별 특정 정보 추가
+        if hasattr(self.model, 'lstm'):
+            summary["lstm_layers"] = self.config.lstm_layers
+            summary["lstm_bidirectional"] = self.config.lstm_bidirectional
+        elif hasattr(self.model, 'gru'):
+            summary["gru_layers"] = self.config.gru_layers
+            summary["gru_bidirectional"] = self.config.gru_bidirectional
+        elif hasattr(self.model, 'transformer'):
+            summary["transformer_layers"] = self.config.transformer_layers
+            summary["transformer_heads"] = self.config.transformer_heads
+        
+        return summary
+    
+    def save_model(self, filepath: str):
+        """모델 저장"""
+        if self.model is None:
+            raise ValueError("저장할 모델이 없습니다.")
+        
+        save_data = {
+            'model_state_dict': self.model.state_dict(),
+            'config': self.config.__dict__,
+            'scaler': self.scaler,
+            'training_history': self.training_history
+        }
+        
+        torch.save(save_data, filepath)
+    
+    def load_model(self, filepath: str):
+        """모델 로드"""
+        save_data = torch.load(filepath, map_location=self.device)
+        
+        # Config 복원
+        for key, value in save_data['config'].items():
+            setattr(self.config, key, value)
+        
+        # 모델 재구성
+        model_class = self._model_map.get(self.config.model_type, ImprovedFactorMLP)
+        
+        # 모델 타입에 따라 input_dim 추출 방법 다름
+        state_dict = save_data['model_state_dict']
+        if self.config.model_type == "mlp":
+            input_dim = state_dict['layers.0.weight'].shape[1]
+        elif self.config.model_type in ["lstm", "gru"]:
+            input_dim = state_dict['lstm.weight_ih_l0'].shape[1] if 'lstm.weight_ih_l0' in state_dict else state_dict['gru.weight_ih_l0'].shape[1]
+        elif self.config.model_type == "transformer":
+            input_dim = state_dict['embedding.weight'].shape[1]
+        elif self.config.model_type == "cnn1d":
+            # CNN1D의 경우 첫 번째 conv1d layer의 입력 차원에서 추정
+            input_dim = 100  # 기본값으로 설정 (실제로는 더 정교한 방법 필요)
+        elif self.config.model_type == "hybrid":
+            input_dim = state_dict['lstm.weight_ih_l0'].shape[1]
+        else:
+            input_dim = 100  # 기본값
+        
+        self.model = model_class(self.config, input_dim).to(self.device)
+        
+        # 상태 복원
+        self.model.load_state_dict(save_data['model_state_dict'])
+        self.scaler = save_data['scaler']
+        self.training_history = save_data.get('training_history', {})
