@@ -1,321 +1,248 @@
+"""
+데이터 다운로드, 캐싱, 전처리 담당 클래스 (개선된 버전)
+Handles data downloading, caching, and preprocessing (Improved Version)
+"""
+
 import os
 import pandas as pd
 import numpy as np
 import streamlit as st
 import FinanceDataReader as fdr
+import yfinance as yf
 from typing import Optional, Dict, List, Tuple
 from datetime import datetime, timedelta
 import pickle
 import hashlib
 
-from config import DataConfig, ModelConfig
+from config import DataConfig
 from utils import (
-    validate_dataframe, 
-    normalize_timezone, 
-    clean_data, 
+    validate_dataframe,
+    normalize_timezone,
+    clean_data,
     create_date_range,
-    show_dataframe_info,
     display_error_with_suggestions,
     logger
 )
 
 class DataHandler:
-    """데이터 다운로드, 캐싱, 전처리를 담당하는 클래스"""
-    
+    """데이터 다운로드, 캐싱, 전처리를 담당하는 클래스 (개선된 버전)"""
+
     def __init__(self, config: DataConfig):
         self.config = config
         self.local_path = config.local_data_path
         self._ensure_directories()
-        
+
     def _ensure_directories(self):
         """필요한 디렉토리 생성"""
-        os.makedirs(self.local_path, exist_ok=True)
         os.makedirs(os.path.join(self.local_path, 'cache'), exist_ok=True)
         os.makedirs(os.path.join(self.local_path, 'processed'), exist_ok=True)
-    
+
     def _generate_cache_key(self, ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> str:
         """캐시 키 생성"""
         key_string = f"{ticker}_{start.strftime('%Y%m%d')}_{end.strftime('%Y%m%d')}"
         return hashlib.md5(key_string.encode()).hexdigest()
-    
+
     def _get_cache_path(self, cache_key: str) -> str:
         """캐시 파일 경로 반환"""
         return os.path.join(self.local_path, 'cache', f"{cache_key}.pkl")
-    
-    def _is_cache_valid(self, cache_path: str, max_age_hours: int = 24) -> bool:
-        """캐시 유효성 확인"""
+
+    def _is_cache_valid(self, cache_path: str) -> bool:
+        """캐시 유효성 확인 (파일 존재 및 유효 기간)"""
         if not os.path.exists(cache_path):
             return False
         
-        cache_time = datetime.fromtimestamp(os.path.getmtime(cache_path))
-        return datetime.now() - cache_time < timedelta(hours=max_age_hours)
-    
+        cache_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(cache_path))
+        return cache_age < timedelta(seconds=self.config.cache_ttl)
+
     def _load_from_cache(self, cache_path: str) -> Optional[pd.DataFrame]:
         """캐시에서 데이터 로드"""
         try:
             with open(cache_path, 'rb') as f:
                 return pickle.load(f)
-        except Exception as e:
-            logger.warning(f"캐시 로드 실패: {e}")
+        except (pickle.UnpicklingError, EOFError, FileNotFoundError) as e:
+            logger.warning(f"캐시 로드 실패 ({cache_path}): {e}. 캐시 파일을 삭제합니다.")
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
             return None
-    
-    def _save_to_cache(self, df: pd.DataFrame, cache_path: str) -> bool:
+
+    def _save_to_cache(self, df: pd.DataFrame, cache_path: str):
         """데이터를 캐시에 저장"""
         try:
             with open(cache_path, 'wb') as f:
                 pickle.dump(df, f)
-            return True
         except Exception as e:
-            logger.error(f"캐시 저장 실패: {e}")
-            return False
-    
-    def download_data(self, ticker: str, start: pd.Timestamp, end: pd.Timestamp, 
-                     use_cache: bool = True, clean: bool = True) -> Optional[pd.DataFrame]:
-        """데이터 다운로드 및 캐싱"""
-        
-        # 입력 검증
-        if not ticker or not ticker.strip():
-            st.error("티커를 입력해주세요.")
+            logger.error(f"캐시 저장 실패 ({cache_path}): {e}")
+
+    def download_data(self, ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> Optional[pd.DataFrame]:
+        """단일 종목 데이터 다운로드 및 캐싱 (로직 개선)"""
+        if not ticker or not isinstance(ticker, str):
+            st.error("유효한 티커 문자열을 입력해야 합니다.")
             return None
-        
         ticker = ticker.upper().strip()
-        
-        try:
-            start, end = create_date_range(start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d'))
-        except Exception:
-            return None
-        
-        # 캐시 확인
+
         cache_key = self._generate_cache_key(ticker, start, end)
         cache_path = self._get_cache_path(cache_key)
-        
-        if use_cache and self._is_cache_valid(cache_path):
+
+        if self._is_cache_valid(cache_path):
             df = self._load_from_cache(cache_path)
-            if df is not None and validate_dataframe(df, ticker, self.config.required_columns):
+            if df is not None:
                 st.success(f"캐시에서 {ticker} 데이터를 로드했습니다.")
                 return normalize_timezone(df)
-        
-        # 새로운 데이터 다운로드
+
         with st.spinner(f"{ticker} 데이터를 다운로드 중..."):
             try:
                 df = self._download_from_source(ticker, start, end)
-                if df is None:
+                if df is None or not validate_dataframe(df, ticker, self.config.required_columns):
                     return None
                 
-                # 데이터 검증
-                if not validate_dataframe(df, ticker, self.config.required_columns):
-                    return None
-                
-                # 타임존 정규화
                 df = normalize_timezone(df)
+                df = clean_data(df, self.config.required_columns)
                 
-                # 데이터 정리
-                if clean:
-                    df = clean_data(df, self.config.required_columns)
-                
-                # 캐시 저장
-                if use_cache:
-                    self._save_to_cache(df, cache_path)
-                
-                st.success(f"{ticker} 데이터 다운로드 완료: {len(df)}개 데이터")
+                self._save_to_cache(df, cache_path)
+                st.success(f"{ticker} 데이터 다운로드 완료: {len(df)} 행")
                 return df
-                
             except Exception as e:
                 error_msg = f"{ticker} 데이터 다운로드 실패: {str(e)}"
                 suggestions = [
-                    "티커 심볼이 올바른지 확인하세요 (예: AAPL, GOOGL)",
-                    "네트워크 연결을 확인하세요",
-                    "날짜 범위를 조정해보세요",
-                    "상장폐지된 종목이 아닌지 확인하세요"
+                    "티커 심볼이 올바른지 확인하세요 (예: AAPL, GOOGL).",
+                    "네트워크 연결을 확인하세요.",
+                    "날짜 범위를 조정해보세요."
                 ]
                 display_error_with_suggestions(error_msg, suggestions)
                 return None
-    
+
     def _download_from_source(self, ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> Optional[pd.DataFrame]:
-        """실제 데이터 소스에서 다운로드"""
+        """데이터 소스에서 다운로드 (fdr 우선, yfinance 백업)"""
         try:
-            # FinanceDataReader 사용
             df = fdr.DataReader(ticker, start, end)
-            
-            if df.empty:
-                st.error(f"'{ticker}'에 대한 데이터가 없습니다.")
-                return None
-            
-            return df
-            
-        except Exception as e:
-            logger.error(f"FDR 다운로드 실패: {e}")
-            # 백업으로 yfinance 시도
-            try:
-                import yfinance as yf
-                stock = yf.Ticker(ticker)
-                df = stock.history(start=start, end=end)
-                
-                if df.empty:
-                    return None
-                
-                # 컬럼명 표준화
-                df = df.rename(columns={
-                    'Open': 'Open', 'High': 'High', 'Low': 'Low', 
-                    'Close': 'Close', 'Volume': 'Volume'
-                })
-                
+            if not df.empty:
                 return df
-                
-            except Exception as e2:
-                logger.error(f"yfinance 백업 다운로드 실패: {e2}")
-                raise e
-    
-    def get_multiple_tickers(self, tickers: List[str], start: pd.Timestamp, end: pd.Timestamp) -> Dict[str, pd.DataFrame]:
-        """여러 티커의 데이터를 동시에 다운로드"""
-        results = {}
-        progress_bar = st.progress(0)
-        
-        for i, ticker in enumerate(tickers):
-            progress_bar.progress((i + 1) / len(tickers))
-            
-            df = self.download_data(ticker, start, end)
-            if df is not None:
-                results[ticker] = df
-            
-        progress_bar.empty()
-        
-        if results:
-            st.success(f"{len(results)}개 종목 데이터 다운로드 완료")
-        else:
-            st.error("다운로드된 데이터가 없습니다.")
-        
-        return results
-    
+        except Exception as e:
+            logger.warning(f"FinanceDataReader 다운로드 실패 ({ticker}): {e}. yfinance로 재시도합니다.")
+
+        try:
+            df = yf.download(ticker, start=start, end=end, progress=False)
+            if df.empty:
+                st.error(f"'{ticker}'에 대한 데이터를 찾을 수 없습니다.")
+                return None
+            return df
+        except Exception as e:
+            raise IOError(f"yfinance 다운로드도 실패했습니다 ({ticker}): {e}")
+
     def download_universe_data(self, tickers: List[str], start: pd.Timestamp, end: pd.Timestamp) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
-        """유니버스 전체 종목 데이터 다운로드 및 정렬"""
+        """유니버스 전체 종목 데이터 다운로드 (메모리 최적화)"""
+        price_series_list, volume_series_list = [], []
         
-        price_data = {}
-        volume_data = {}
+        # 메모리 사용량 제한 (최대 종목 수)
+        max_tickers = min(len(tickers), 50)  # 메모리 절약을 위해 최대 50개로 제한
+        if len(tickers) > max_tickers:
+            st.warning(f"메모리 절약을 위해 {max_tickers}개 종목으로 제한합니다.")
+            tickers = tickers[:max_tickers]
         
-        with st.spinner(f"{len(tickers)}개 종목 데이터 다운로드 중..."):
-            progress_bar = st.progress(0)
-            
-            for i, ticker in enumerate(tickers):
-                progress_bar.progress((i + 1) / len(tickers))
+        progress_bar = st.progress(0)
+        for i, ticker in enumerate(tickers):
+            df = self.download_data(ticker, start, end)
+            if df is not None and len(df) > 50:
+                # 메모리 절약을 위해 필요한 컬럼만 저장
+                price_series_list.append(df['Close'].rename(ticker))
+                volume_series_list.append(df['Volume'].rename(ticker))
                 
-                try:
-                    df = self.download_data(ticker, start, end, use_cache=True, clean=True)
-                    
-                    if df is not None and len(df) > 50:  # 최소 50일 데이터 필요
-                        price_data[ticker] = df['Close']
-                        volume_data[ticker] = df['Volume']
-                        
-                except Exception as e:
-                    st.warning(f"{ticker} 다운로드 실패: {e}")
-                    continue
-            
-            progress_bar.empty()
-        
-        if not price_data:
-            st.error("다운로드된 데이터가 없습니다.")
+                # 원본 데이터 즉시 삭제로 메모리 절약
+                del df
+            progress_bar.progress((i + 1) / len(tickers))
+        progress_bar.empty()
+
+        if not price_series_list:
+            st.error("유효한 데이터를 가진 종목이 없습니다.")
             return None, None
+
+        # pd.concat으로 한 번에 DataFrame 생성
+        universe_df = pd.concat(price_series_list, axis=1)
+        volume_df = pd.concat(volume_series_list, axis=1)
+
+        # 공통 날짜 인덱스 생성 및 데이터 정렬
+        common_index = universe_df.dropna().index
+        universe_df = universe_df.loc[common_index].ffill()
+        volume_df = volume_df.loc[common_index].ffill()
+
+        st.success(f"✅ {len(universe_df.columns)}개 종목, {len(universe_df)}일 데이터 준비 완료")
+        return universe_df, volume_df
+
+    def create_features_targets(self, df: pd.DataFrame, window: int, horizon: int) -> Tuple[np.ndarray, np.ndarray, List[pd.Timestamp]]:
+        """시계열 특징/타겟 생성 (가독성 및 효율성 개선)"""
         
-        # DataFrame으로 변환 및 정렬
-        try:
-            universe_df = pd.DataFrame(price_data)
-            volume_df = pd.DataFrame(volume_data)
-            
-            # 결측값 처리
-            universe_df = universe_df.fillna(method='ffill').fillna(method='bfill')
-            volume_df = volume_df.fillna(method='ffill').fillna(method='bfill')
-            
-            # 모든 종목이 데이터를 가진 기간만 선택
-            min_length = min(len(universe_df), 252)  # 최대 1년
-            universe_df = universe_df.tail(min_length)
-            volume_df = volume_df.tail(min_length)
-            
-            # 최종 결측값 체크
-            if universe_df.isnull().any().any():
-                st.warning("일부 결측값이 있어 보간 처리했습니다.")
-                universe_df = universe_df.interpolate(method='linear')
-                volume_df = volume_df.interpolate(method='linear')
-            
-            st.success(f"✅ {len(universe_df.columns)}개 종목, {len(universe_df)}일 데이터 준비 완료")
-            
-            return universe_df, volume_df
-            
-        except Exception as e:
-            st.error(f"유니버스 데이터 정렬 실패: {e}")
-            return None, None
-    
-    def create_features_targets(self, df: pd.DataFrame, window: int = None, 
-                              horizon: int = None) -> Tuple[np.ndarray, np.ndarray, List[pd.Timestamp]]:
-        """시계열 특징/타겟 생성"""
-        if window is None:
-            window = 10
-        if horizon is None:
-            horizon = 5
-        
-        feature_columns = self.config.required_columns
+        # 1. 특징(Feature) 계산
+        features = pd.DataFrame(index=df.index)
+        features['returns'] = df['Close'].pct_change()
+        features['log_volume'] = np.log1p(df['Volume'])
+        # ... 추가적인 특징들 ...
+        features = features.fillna(0).replace([np.inf, -np.inf], 0)
+
+        # 2. 타겟(Target) 계산
+        target = df['Close'].pct_change(periods=horizon).shift(-horizon).rename('target')
+
+        # 3. 데이터셋 생성 (windowing)
         X, y, dates = [], [], []
+        # 공통 인덱스에서만 루프 실행
+        valid_indices = features.dropna().index.intersection(target.dropna().index)
         
-        for i in range(len(df) - window - horizon):
-            # 특징 추출
-            window_data = df[feature_columns].iloc[i:i+window]
+        for i in range(len(valid_indices) - window):
+            window_end_idx = valid_indices[i + window -1]
+            target_idx = valid_indices[i + window -1] # 현재 윈도우의 마지막 날을 기준으로 타겟 예측
             
-            # 정규화된 특징 생성
-            features = []
-            for col in feature_columns:
-                values = window_data[col].values
-                if col == 'Volume':
-                    # Volume은 로그 변환
-                    features.extend(np.log1p(values))
-                else:
-                    # 가격 데이터는 수익률로 변환
-                    returns = np.diff(values) / values[:-1]
-                    features.extend(returns)
-                    features.append(values[-1])  # 최근 가격
+            if target_idx not in target.index: continue
+
+            window_slice = features.loc[valid_indices[i]:window_end_idx]
             
-            X.append(features)
-            
-            # 타겟 (미래 수익률)
-            current_price = df['Close'].iloc[i + window]
-            future_price = df['Close'].iloc[i + window + horizon]
-            future_return = (future_price / current_price) - 1
-            y.append(future_return)
-            
-            dates.append(df.index[i + window])
-        
+            X.append(window_slice.values.flatten()) # 윈도우를 1차원 배열로 펼침
+            y.append(target.loc[target_idx])
+            dates.append(target_idx)
+
         return np.array(X), np.array(y), dates
-    
-    def save_processed_data(self, data: Dict, filename: str):
-        """처리된 데이터 저장"""
-        filepath = os.path.join(self.local_path, 'processed', filename)
-        try:
-            with open(filepath, 'wb') as f:
-                pickle.dump(data, f)
-            st.success(f"데이터가 저장되었습니다: {filepath}")
-        except Exception as e:
-            st.error(f"데이터 저장 실패: {e}")
-    
-    def load_processed_data(self, filename: str) -> Optional[Dict]:
-        """처리된 데이터 로드"""
-        filepath = os.path.join(self.local_path, 'processed', filename)
-        try:
-            with open(filepath, 'rb') as f:
-                return pickle.load(f)
-        except Exception as e:
-            st.error(f"데이터 로드 실패: {e}")
-            return None
-    
-    def clear_cache(self):
-        """캐시 정리"""
+
+    def clear_cache(self, max_age_days: int = 7, max_size_mb: int = 500):
+        """캐시 정리 (오래된 파일 및 크기 제한)"""
         cache_dir = os.path.join(self.local_path, 'cache')
+        removed_count = 0
+        total_size = 0
+        
         try:
+            # 파일 크기와 수정 시간 정보 수집
+            files_info = []
             for filename in os.listdir(cache_dir):
                 file_path = os.path.join(cache_dir, filename)
                 if os.path.isfile(file_path):
+                    stat = os.stat(file_path)
+                    file_age = datetime.now() - datetime.fromtimestamp(stat.st_mtime)
+                    files_info.append((file_path, stat.st_size, file_age))
+                    total_size += stat.st_size
+            
+            # 크기 제한 확인 (MB 단위)
+            total_size_mb = total_size / (1024 * 1024)
+            
+            # 오래된 파일 삭제
+            for file_path, file_size, file_age in files_info:
+                if file_age > timedelta(days=max_age_days):
                     os.remove(file_path)
-            st.success("캐시가 정리되었습니다.")
+                    removed_count += 1
+                    total_size_mb -= file_size / (1024 * 1024)
+            
+            # 크기 제한 초과시 오래된 순으로 추가 삭제
+            if total_size_mb > max_size_mb:
+                files_info = [(p, s, a) for p, s, a in files_info if os.path.exists(p)]
+                files_info.sort(key=lambda x: x[2], reverse=True)  # 오래된 순
+                
+                for file_path, file_size, _ in files_info:
+                    if total_size_mb <= max_size_mb:
+                        break
+                    os.remove(file_path)
+                    removed_count += 1
+                    total_size_mb -= file_size / (1024 * 1024)
+            
+            st.success(f"캐시 정리 완료: {removed_count}개 파일 삭제, 현재 크기: {total_size_mb:.1f}MB")
         except Exception as e:
             st.error(f"캐시 정리 실패: {e}")
-    
+
     def get_cache_info(self) -> Dict:
         """캐시 정보 반환"""
         cache_dir = os.path.join(self.local_path, 'cache')

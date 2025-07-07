@@ -326,10 +326,16 @@ class AlphaFactorEngine:
     
     def calculate_all_factors(self, universe_data: pd.DataFrame, volume_data: Optional[pd.DataFrame] = None,
                             factor_types: List[str] = None) -> Dict[str, pd.DataFrame]:
-        """모든 팩터 계산"""
+        """모든 팩터 계산 (메모리 최적화)"""
+        
+        # 메모리 절약을 위해 데이터 크기 확인
+        data_size = universe_data.memory_usage(deep=True).sum() / 1024**2  # MB
+        if data_size > 100:  # 100MB 초과시 경고
+            st.warning(f"데이터 크기가 {data_size:.1f}MB로 큽니다. 처리 시간이 오래 걸릴 수 있습니다.")
         
         if factor_types is None:
-            factor_types = ['momentum', 'reversal', 'volatility', 'rsi', 'price_to_ma', 'bollinger_band', 'macd', 'stochastic', 'williams_r', 'cci', 'money_flow', 'aroon', 'obv', 'volume_price_trend', 'chaikin_money_flow', 'force_index', 'ease_of_movement', 'accumulation_distribution']
+            # 메모리 절약을 위해 기본 팩터만 선택
+            factor_types = ['momentum', 'reversal', 'volatility', 'rsi', 'price_to_ma']
         
         factors_dict = {}
         

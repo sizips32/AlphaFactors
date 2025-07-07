@@ -85,6 +85,34 @@ class PortfolioBacktester:
         
         return weights
     
+    def _apply_rebalancing_frequency(self, weights: pd.DataFrame, rebalance_freq: str) -> pd.DataFrame:
+        """리밸런싱 빈도 적용 (개선된 로직)"""
+        
+        # 리밸런싱 날짜 결정
+        rebalance_dates_map = {
+            'daily': weights.index,
+            'weekly': weights.index[weights.index.dayofweek == 4],  # 금요일
+            'monthly': weights.resample('M').last().index,
+            'quarterly': weights.resample('Q').last().index,
+            'yearly': weights.resample('A').last().index
+        }
+        
+        rebalance_dates = rebalance_dates_map.get(rebalance_freq, weights.index)
+        
+        # 매일 리밸런싱이 아닌 경우 forward fill 적용
+        if rebalance_freq != 'daily':
+            # 리밸런싱 날짜에만 새로운 가중치 적용, 나머지는 이전 값 유지
+            rebalanced_weights = weights.copy()
+            
+            # 리밸런싱 날짜가 아닌 날에는 이전 값으로 채움
+            for i, date in enumerate(weights.index):
+                if date not in rebalance_dates and i > 0:
+                    rebalanced_weights.loc[date] = rebalanced_weights.iloc[i-1]
+            
+            return rebalanced_weights.ffill()
+        
+        return weights
+    
     def calculate_transaction_costs(self, weights: pd.DataFrame, cost_bps: float = 10) -> pd.Series:
         """거래비용 계산 (단위: bps)"""
         weight_changes = weights.diff().abs().sum(axis=1)
@@ -106,23 +134,8 @@ class PortfolioBacktester:
                 long_only=long_only, max_position=max_position
             )
             
-            # 리밸런싱 빈도 조정
-            if rebalance_freq == 'weekly':
-                # 매주 금요일 또는 마지막 거래일에만 리밸런싱
-                rebalance_dates = weights.index[weights.index.dayofweek == 4]  # 금요일
-                weights = weights.reindex(weights.index).fillna(method='ffill')
-                for date in weights.index:
-                    if date not in rebalance_dates:
-                        if date != weights.index[0]:  # 첫날 제외
-                            weights.loc[date] = weights.shift(1).loc[date]
-            elif rebalance_freq == 'monthly':
-                # 매월 마지막 거래일에만 리밸런싱
-                rebalance_dates = weights.resample('M').last().index
-                weights = weights.reindex(weights.index).fillna(method='ffill')
-                for date in weights.index:
-                    if date not in rebalance_dates:
-                        if date != weights.index[0]:
-                            weights.loc[date] = weights.shift(1).loc[date]
+            # 리밸런싱 빈도 조정 (개선된 로직)
+            weights = self._apply_rebalancing_frequency(weights, rebalance_freq)
             
             # 2. 포트폴리오 수익률 계산
             # 전일 가중치로 당일 수익률 계산
@@ -420,3 +433,84 @@ class FactorBacktester:
         plt.tight_layout()
         st.pyplot(fig)
         plt.close(fig)
+
+def run_backtest_by_strategy(
+  backtester, 
+  strategy_type: str, 
+  factor_scores: pd.DataFrame, 
+  rebalance_freq: str = 'daily', 
+  transaction_cost_bps: float = 10,
+  max_position: float = 0.1
+):
+  """
+  전략 유형에 따라 분기하여 백테스트 실행
+  """
+  if strategy_type == "Dynamic Allocation (동적 자산배분)":
+    # 예시: 변동성 기반 동적 비중 (factor_scores가 변동성 등일 수 있음)
+    return backtester.run_backtest(
+      factor_scores, 
+      method='linear', 
+      long_only=True, 
+      rebalance_freq=rebalance_freq, 
+      transaction_cost_bps=transaction_cost_bps,
+      max_position=max_position
+    )
+  elif strategy_type == "Long Only (매수 전용)":
+    return backtester.run_backtest(
+      factor_scores, 
+      method='rank', 
+      long_only=True, 
+      rebalance_freq=rebalance_freq, 
+      transaction_cost_bps=transaction_cost_bps,
+      max_position=max_position
+    )
+  elif strategy_type == "Long-Short (롱숏)":
+    return backtester.run_backtest(
+      factor_scores, 
+      method='rank', 
+      long_only=False, 
+      rebalance_freq=rebalance_freq, 
+      transaction_cost_bps=transaction_cost_bps,
+      max_position=max_position
+    )
+  elif strategy_type == "Market Neutral (시장중립)":
+    # 롱숏과 유사하나, 베타 중립 등 추가 로직 필요할 수 있음
+    # 여기서는 단순 롱숏과 동일하게 처리 (추후 확장 가능)
+    return backtester.run_backtest(
+      factor_scores, 
+      method='rank', 
+      long_only=False, 
+      rebalance_freq=rebalance_freq, 
+      transaction_cost_bps=transaction_cost_bps,
+      max_position=max_position
+    )
+  elif strategy_type == "Leveraged (레버리지)":
+    # 레버리지: 포트폴리오 수익률에 레버리지 곱하기
+    result = backtester.run_backtest(
+      factor_scores, 
+      method='rank', 
+      long_only=True, 
+      rebalance_freq=rebalance_freq, 
+      transaction_cost_bps=transaction_cost_bps,
+      max_position=max_position
+    )
+    leverage = 2  # 예시: 2배 레버리지
+    result['portfolio_returns'] *= leverage
+    result['cumulative_returns'] = (1 + result['portfolio_returns']).cumprod()
+    return result
+  else:
+    raise ValueError("알 수 없는 전략 유형입니다.")
+
+strategy_descriptions = {
+  "Dynamic Allocation (동적 자산배분)": "시장 상황에 따라 자산 비중을 동적으로 조정하는 전략입니다. 변동성, 모멘텀 등 다양한 지표를 활용할 수 있습니다.",
+  "Long Only (매수 전용)": "상승이 기대되는 종목만을 매수하는 전통적인 투자 전략입니다. 공매도(숏)는 하지 않습니다.",
+  "Long-Short (롱숏)": "상승이 기대되는 종목은 매수(Long), 하락이 예상되는 종목은 공매도(Short)하여 양방향 수익을 추구합니다.",
+  "Market Neutral (시장중립)": "시장 전체의 방향성과 무관하게, 롱과 숏의 비중을 맞춰 시장 변동성의 영향을 최소화하는 전략입니다.",
+  "Leveraged (레버리지)": "투자 비중을 확대(예: 2배)하여 수익과 손실 모두를 증폭시키는 전략입니다. 위험도가 높으니 주의가 필요합니다."
+}
+
+st.subheader("전략별 설명")
+
+for name, desc in strategy_descriptions.items():
+  with st.expander(f"📌 {name}"):
+    st.write(desc)

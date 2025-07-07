@@ -67,7 +67,7 @@ def clean_data(df: pd.DataFrame, required_columns: List[str]) -> pd.DataFrame:
     df_clean = df.copy()
     
     # 결측값 처리 (forward fill 후 backward fill)
-    df_clean[required_columns] = df_clean[required_columns].fillna(method='ffill').fillna(method='bfill')
+    df_clean[required_columns] = df_clean[required_columns].ffill().bfill()
     
     # 이상값 처리 (각 컬럼별로 99.5% 분위수로 캡핑)
     for col in required_columns:
@@ -144,6 +144,10 @@ def show_dataframe_info(df: pd.DataFrame, title: str = "데이터 정보"):
         with col3:
             st.metric("종료일", df.index.max().strftime('%Y-%m-%d'))
         
+        if isinstance(df, pd.DataFrame):
+            for col in df.columns:
+                if df[col].dtype == 'object':
+                    df[col] = df[col].astype(str)
         st.dataframe(df.describe(), use_container_width=True)
 
 def display_error_with_suggestions(error_msg: str, suggestions: List[str] = None):
@@ -297,6 +301,10 @@ def show_data_quality_report(df: pd.DataFrame, title: str = "데이터 품질 �
         '고유값 수': df.nunique(),
         '결측값 수': df.isnull().sum()
     })
+    if isinstance(dtype_info, pd.DataFrame):
+        for col in dtype_info.columns:
+            if dtype_info[col].dtype == 'object':
+                dtype_info[col] = dtype_info[col].astype(str)
     st.dataframe(dtype_info, use_container_width=True)
 
 def cache_key_generator(*args) -> str:
@@ -369,7 +377,7 @@ def summarize_with_llm(text: str, prompt: str = "", api_key: str = None) -> str:
         system_prompt = prompt or "아래 데이터를 투자 전문가 관점에서 해석/제안해줘."
         user_content = f"분석 데이터:\n{text}"
         response = openai.chat.completions.create(
-            model="gpt-4.1-mini-2025-04-14",  # 최신 GPT-4.1 mini
+            model="gpt-4o-mini",  # 유효한 GPT-4 mini 모델
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}

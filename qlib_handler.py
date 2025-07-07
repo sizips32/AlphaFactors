@@ -284,6 +284,10 @@ class QlibHandler:
             important_metrics = ['IC', 'ICIR', 'Rank IC', 'Rank ICIR']
             filtered_risk_df = risk_df.loc[risk_df.index.intersection(important_metrics)]
             
+            if isinstance(filtered_risk_df, pd.DataFrame):
+                for col in filtered_risk_df.columns:
+                    if filtered_risk_df[col].dtype == 'object':
+                        filtered_risk_df[col] = filtered_risk_df[col].astype(str)
             st.dataframe(filtered_risk_df, use_container_width=True)
             
             # 일별 수익률 분포
@@ -365,6 +369,11 @@ class QlibHandler:
             })
         
         comparison_df = pd.DataFrame(comparison_data)
+        
+        if isinstance(comparison_df, pd.DataFrame):
+            for col in comparison_df.columns:
+                if comparison_df[col].dtype == 'object':
+                    comparison_df[col] = comparison_df[col].astype(str)
         st.dataframe(comparison_df, use_container_width=True)
     
     def export_results(self, cum_returns: pd.Series, risk_metrics: Dict, 

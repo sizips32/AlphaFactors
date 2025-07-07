@@ -1334,6 +1334,10 @@ class AlphaForgeApp:
         for col in detailed_df.columns:
             if col != '팩터명':
                 detailed_df[col] = detailed_df[col].astype(str)
+        if isinstance(detailed_df, pd.DataFrame):
+            for col in detailed_df.columns:
+                if detailed_df[col].dtype == 'object':
+                    detailed_df[col] = detailed_df[col].astype(str)
         st.dataframe(detailed_df, use_container_width=True)
         
         # 3. 팩터별 월별 수익률 히트맵
@@ -2077,6 +2081,10 @@ class AlphaForgeApp:
                     if isinstance(meta['params'], dict):
                         if all(isinstance(v, (str, int, float, bool)) for v in meta['params'].values()):
                             params_df = pd.DataFrame.from_dict(meta['params'], orient='index', columns=['값'])
+                            if isinstance(params_df, pd.DataFrame):
+                                for col in params_df.columns:
+                                    if params_df[col].dtype == 'object':
+                                        params_df[col] = params_df[col].astype(str)
                             st.dataframe(params_df, use_container_width=True)
                         else:
                             st.write("파라미터 정보 (복잡한 구조):")
@@ -2269,6 +2277,10 @@ class AlphaForgeApp:
                     }
                     
                     comparison_df = pd.DataFrame(comparison_data)
+                    if isinstance(comparison_df, pd.DataFrame):
+                        for col in comparison_df.columns:
+                            if comparison_df[col].dtype == 'object':
+                                comparison_df[col] = comparison_df[col].astype(str)
                     st.dataframe(comparison_df, use_container_width=True)
                     
                     # 승자 판정
@@ -2675,6 +2687,10 @@ class AlphaForgeApp:
                             '평균': f"{factor.mean().mean():.4f}"
                         })
                     perf_df = pd.DataFrame(performance_data)
+                    if isinstance(perf_df, pd.DataFrame):
+                        for col in perf_df.columns:
+                            if perf_df[col].dtype == 'object':
+                                perf_df[col] = perf_df[col].astype(str)
                     st.dataframe(perf_df, use_container_width=True)
                 # 팩터 Zoo 자동 저장
                 now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2718,4 +2734,3 @@ if __name__ == "__main__":
         logger.error(f"Application startup error: {e}")
         import traceback
         st.code(traceback.format_exc())
-
