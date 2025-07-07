@@ -2783,19 +2783,45 @@ class AlphaForgeApp:
         
         # 메가-알파 실행 버튼
         if st.button("🚀 메가-알파 시뮬레이션 실행", type="primary", use_container_width=True):
-            
-            if not st.session_state.universe_loaded:
-                st.error("유니버스 데이터가 로드되지 않았습니다.")
-                return
-            
             try:
+                # 데이터 확인 및 자동 로드
+                universe_data = st.session_state.get('universe_data')
+                volume_data = st.session_state.get('volume_data')
+                
+                if universe_data is None or universe_data.empty:
+                    st.warning("⚠️ 유니버스 데이터가 없습니다. 먼저 데이터를 로드해주세요.")
+                    
+                    # 자동 데이터 로드 시도
+                    if st.button("🔄 샘플 데이터 자동 로드 (FAANG 주식)", key="auto_load_mega_alpha"):
+                        with st.spinner("샘플 데이터 로딩 중..."):
+                            # 기본 설정으로 FAANG 주식 데이터 로드
+                            import pandas as pd
+                            from datetime import datetime, timedelta
+                            
+                            tickers = ['AAPL', 'GOOGL', 'META', 'AMZN', 'NFLX']
+                            end_date = datetime.now()
+                            start_date = end_date - timedelta(days=365 * 2)  # 2년 데이터
+                            
+                            universe_data, volume_data = self.data_handler.download_universe_data(
+                                tickers, 
+                                pd.Timestamp(start_date), 
+                                pd.Timestamp(end_date)
+                            )
+                            
+                            if universe_data is not None and not universe_data.empty:
+                                st.session_state.universe_data = universe_data
+                                st.session_state.volume_data = volume_data
+                                st.session_state.universe_loaded = True
+                                st.success("✅ 샘플 데이터 로드 완료!")
+                                st.rerun()
+                            else:
+                                st.error("❌ 데이터 로드에 실패했습니다.")
+                    return
+                
                 # 메가-알파 엔진 초기화
                 mega_alpha_engine = MegaAlphaEngine(mega_alpha_config)
                 
                 # 시뮬레이션 실행
-                universe_data = st.session_state.get('universe_data')
-                volume_data = st.session_state.get('volume_data')
-                
                 with st.spinner("메가-알파 시뮬레이션 실행 중... (수분 소요될 수 있습니다)"):
                     results = mega_alpha_engine.run_mega_alpha_simulation(
                         universe_data, volume_data

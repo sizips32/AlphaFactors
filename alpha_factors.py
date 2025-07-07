@@ -333,8 +333,16 @@ class AlphaFactorEngine:
             st.error("universe_data가 None입니다. 데이터를 먼저 로드해주세요.")
             return {}
         
+        if not isinstance(universe_data, pd.DataFrame):
+            st.error(f"universe_data가 DataFrame이 아닙니다. 타입: {type(universe_data)}")
+            return {}
+        
         if universe_data.empty:
             st.error("universe_data가 비어있습니다.")
+            return {}
+        
+        if len(universe_data.columns) == 0:
+            st.error("universe_data에 종목이 없습니다.")
             return {}
         
         # 메모리 절약을 위해 데이터 크기 확인
