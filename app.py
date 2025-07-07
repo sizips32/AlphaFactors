@@ -2793,8 +2793,8 @@ class AlphaForgeApp:
                 mega_alpha_engine = MegaAlphaEngine(mega_alpha_config)
                 
                 # 시뮬레이션 실행
-                universe_data = st.session_state.get('universe_df')
-                volume_data = st.session_state.get('volume_df')
+                universe_data = st.session_state.get('universe_data')
+                volume_data = st.session_state.get('volume_data')
                 
                 with st.spinner("메가-알파 시뮬레이션 실행 중... (수분 소요될 수 있습니다)"):
                     results = mega_alpha_engine.run_mega_alpha_simulation(

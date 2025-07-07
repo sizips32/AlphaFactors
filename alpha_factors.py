@@ -328,6 +328,15 @@ class AlphaFactorEngine:
                             factor_types: List[str] = None) -> Dict[str, pd.DataFrame]:
         """모든 팩터 계산 (메모리 최적화)"""
         
+        # 입력 데이터 유효성 확인
+        if universe_data is None:
+            st.error("universe_data가 None입니다. 데이터를 먼저 로드해주세요.")
+            return {}
+        
+        if universe_data.empty:
+            st.error("universe_data가 비어있습니다.")
+            return {}
+        
         # 메모리 절약을 위해 데이터 크기 확인
         data_size = universe_data.memory_usage(deep=True).sum() / 1024**2  # MB
         if data_size > 100:  # 100MB 초과시 경고
