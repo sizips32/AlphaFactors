@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 
@@ -12,6 +13,7 @@ from models import ModelTrainer
 from qlib_handler import QlibHandler
 from alpha_factors import AlphaFactorEngine
 from portfolio_backtester import PortfolioBacktester, FactorBacktester
+from mega_alpha_engine import MegaAlphaEngine, MegaAlphaConfig
 from font_config import apply_korean_style
 from utils import (
     show_dataframe_info, 
@@ -215,12 +217,13 @@ class AlphaForgeApp:
         
         st.header("2. 🎯 알파 팩터 생성")
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 통계/기술적 팩터", 
             "🧠 딥러닝 팩터", 
             "📝 공식 기반 팩터", 
             "🦁 팩터 Zoo", 
-            "⚡ 선형/비선형 비교"
+            "⚡ 선형/비선형 비교",
+            "🚀 메가-알파 백테스팅"
         ])
         with tab1:
             self._render_statistical_factor_section()
@@ -232,6 +235,8 @@ class AlphaForgeApp:
             self._render_factor_zoo_section()
         with tab5:
             self._render_linear_vs_nonlinear_section()
+        with tab6:
+            self._render_mega_alpha_backtesting_section()
         
         # 3. Qlib 백테스팅 섹션
         self._render_backtest_section()
@@ -2723,6 +2728,337 @@ class AlphaForgeApp:
             st.error(f"공식 기반 팩터 생성 중 오류: {e}")
             import traceback
             st.code(traceback.format_exc())
+    
+    def _render_mega_alpha_backtesting_section(self):
+        """메가-알파 백테스팅 섹션 렌더링"""
+        
+        st.markdown("### 🚀 메가-알파 시뮬레이션")
+        st.markdown("""
+        **메가-알파 백테스팅**은 여러 팩터를 동적으로 결합하여 최적의 포트폴리오를 구성하는 고급 백테스팅 시스템입니다.
+        - 📊 **동적 팩터 결합**: IC 기반으로 팩터를 선택하고 가중치를 조정
+        - 🎯 **적응형 리밸런싱**: 시장 상황에 따라 포트폴리오 구성을 최적화  
+        - 📈 **성과 분석**: 누적 수익률, 샤프 비율, 최대 손실폭 등 종합 분석
+        - 🔍 **일별 분석**: 특정 날짜의 팩터 구성과 가중치를 상세 분석
+        """)
+        
+        if not st.session_state.universe_loaded:
+            st.warning("⚠️ 먼저 유니버스 데이터를 로드해주세요.")
+            return
+        
+        # 하이퍼파라미터 설정
+        st.markdown("#### ⚙️ 메가-알파 설정")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("**📊 팩터 풀 설정**")
+            factor_pool_size = st.slider("팩터 풀 크기", 3, 15, 8, help="동시에 사용할 최대 팩터 개수")
+            ic_threshold = st.slider("IC 임계값", 0.01, 0.05, 0.02, 0.01, help="팩터 선택을 위한 최소 IC 값")
+            
+        with col2:
+            st.markdown("**⏰ 리밸런싱 설정**")
+            rebalance_freq = st.selectbox("리밸런싱 빈도", 
+                                        ["daily", "weekly", "monthly"], 
+                                        index=1, help="포트폴리오 재구성 주기")
+            lookback_window = st.slider("IC 계산 기간", 30, 120, 60, help="IC 계산에 사용할 과거 데이터 기간(일)")
+            
+        with col3:
+            st.markdown("**💼 포트폴리오 설정**")
+            long_only = st.checkbox("롱온리 전략", True, help="매수 전용 전략 (체크 해제시 롱숏 전략)")
+            transaction_cost = st.slider("거래비용(bps)", 5, 50, 10, help="거래 시 발생하는 비용 (1bps = 0.01%)")
+            max_position = st.slider("최대 종목 비중", 0.05, 0.3, 0.1, 0.01, help="단일 종목 최대 투자 비중")
+        
+        # 메가-알파 설정 객체 생성
+        mega_alpha_config = MegaAlphaConfig(
+            factor_pool_size=factor_pool_size,
+            ic_threshold=ic_threshold,
+            rebalance_frequency=rebalance_freq,
+            lookback_window=lookback_window,
+            long_only=long_only,
+            transaction_cost_bps=transaction_cost,
+            max_position_weight=max_position
+        )
+        
+        # 메가-알파 실행 버튼
+        if st.button("🚀 메가-알파 시뮬레이션 실행", type="primary", use_container_width=True):
+            
+            if not st.session_state.universe_loaded:
+                st.error("유니버스 데이터가 로드되지 않았습니다.")
+                return
+            
+            try:
+                # 메가-알파 엔진 초기화
+                mega_alpha_engine = MegaAlphaEngine(mega_alpha_config)
+                
+                # 시뮬레이션 실행
+                universe_data = st.session_state.get('universe_df')
+                volume_data = st.session_state.get('volume_df')
+                
+                with st.spinner("메가-알파 시뮬레이션 실행 중... (수분 소요될 수 있습니다)"):
+                    results = mega_alpha_engine.run_mega_alpha_simulation(
+                        universe_data, volume_data
+                    )
+                
+                if results:
+                    st.session_state['mega_alpha_results'] = results
+                    st.session_state['mega_alpha_engine'] = mega_alpha_engine
+                    st.success("🎉 메가-알파 시뮬레이션이 완료되었습니다!")
+                    
+                    # 결과 저장 옵션
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        save_name = st.text_input("저장할 이름 (선택사항)", placeholder="예: 고성능_메가알파")
+                    with col2:
+                        st.write("")  # 공간 확보
+                        if st.button("🦁 팩터 Zoo에 저장"):
+                            suffix = f"_{save_name}" if save_name else ""
+                            mega_alpha_engine.save_mega_alpha_results(results, suffix)
+                else:
+                    st.error("메가-알파 시뮬레이션에 실패했습니다.")
+                    
+            except Exception as e:
+                st.error(f"메가-알파 시뮬레이션 중 오류가 발생했습니다: {e}")
+                import traceback
+                with st.expander("상세 오류 정보"):
+                    st.code(traceback.format_exc())
+        
+        # 기존 결과가 있다면 표시
+        if 'mega_alpha_results' in st.session_state and st.session_state['mega_alpha_results']:
+            st.markdown("---")
+            st.markdown("#### 📊 메가-알파 시뮬레이션 결과")
+            
+            results = st.session_state['mega_alpha_results']
+            engine = st.session_state.get('mega_alpha_engine')
+            
+            if engine and results:
+                # 성과 분석 재표시 (이미 MegaAlphaEngine에서 구현됨)
+                engine._analyze_mega_alpha_performance(results)
+                
+                # 추가 분석 도구
+                st.markdown("#### 🔍 추가 분석 도구")
+                
+                analysis_tabs = st.tabs(["📈 상세 성과 분석", "🎯 팩터 기여도", "📊 위험 분석"])
+                
+                with analysis_tabs[0]:
+                    self._render_detailed_performance_analysis(results)
+                
+                with analysis_tabs[1]:
+                    self._render_factor_contribution_analysis(results)
+                
+                with analysis_tabs[2]:
+                    self._render_risk_analysis(results)
+    
+    def _render_detailed_performance_analysis(self, results: Dict[str, Any]):
+        """상세 성과 분석 렌더링"""
+        backtest_results = results.get('backtest_results')
+        if not backtest_results:
+            st.warning("백테스팅 결과가 없습니다.")
+            return
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📊 성과 지표 상세**")
+            metrics = backtest_results['performance_metrics']
+            
+            detailed_metrics = {
+                '수익률 지표': {
+                    '총 수익률': f"{metrics['total_return']:.2%}",
+                    '연간 수익률': f"{metrics['annualized_return']:.2%}",
+                    '벤치마크 대비 초과수익': f"{metrics['excess_return']:.2%}"
+                },
+                '위험 지표': {
+                    '연간 변동성': f"{metrics['annualized_volatility']:.2%}",
+                    '최대 손실폭': f"{metrics['max_drawdown']:.2%}",
+                    '승률': f"{metrics['win_rate']:.2%}"
+                },
+                '비율 지표': {
+                    '샤프 비율': f"{metrics['sharpe_ratio']:.3f}",
+                    '정보 비율': f"{metrics['information_ratio']:.3f}",
+                    '칼마 비율': f"{metrics['calmar_ratio']:.3f}"
+                }
+            }
+            
+            for category, metrics_dict in detailed_metrics.items():
+                st.markdown(f"**{category}**")
+                for metric, value in metrics_dict.items():
+                    st.write(f"• {metric}: {value}")
+                st.write("")
+        
+        with col2:
+            st.markdown("**📈 월별 수익률 분포**")
+            
+            returns = backtest_results['portfolio_returns']
+            monthly_returns = returns.resample('M').apply(lambda x: (1 + x).prod() - 1)
+            
+            if len(monthly_returns) > 0:
+                fig, ax = plt.subplots(figsize=(8, 6))
+                monthly_returns.plot(kind='bar', ax=ax, color='steelblue', alpha=0.7)
+                ax.set_title('월별 수익률')
+                ax.set_ylabel('수익률')
+                ax.set_xlabel('월')
+                ax.grid(True, alpha=0.3)
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close(fig)
+                
+                # 월별 통계
+                st.markdown("**월별 수익률 통계**")
+                monthly_stats = {
+                    '평균': f"{monthly_returns.mean():.2%}",
+                    '표준편차': f"{monthly_returns.std():.2%}",
+                    '최고': f"{monthly_returns.max():.2%}",
+                    '최저': f"{monthly_returns.min():.2%}",
+                    '양수 월 비율': f"{(monthly_returns > 0).mean():.1%}"
+                }
+                
+                for stat, value in monthly_stats.items():
+                    st.write(f"• {stat}: {value}")
+    
+    def _render_factor_contribution_analysis(self, results: Dict[str, Any]):
+        """팩터 기여도 분석 렌더링"""
+        weights_history = results.get('factor_weights_history', {})
+        factor_pool = results.get('factor_pool', {})
+        
+        if not weights_history or not factor_pool:
+            st.warning("팩터 가중치 기록이 없습니다.")
+            return
+        
+        # 팩터별 평균 가중치 계산
+        weights_df = pd.DataFrame(weights_history).T.fillna(0)
+        avg_weights = weights_df.abs().mean().sort_values(ascending=False)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🎯 팩터별 평균 기여도**")
+            
+            # 상위 10개 팩터만 표시
+            top_factors = avg_weights.head(10)
+            
+            fig, ax = plt.subplots(figsize=(8, 6))
+            top_factors.plot(kind='bar', ax=ax, color='lightcoral', alpha=0.8)
+            ax.set_title('팩터별 평균 절대 가중치')
+            ax.set_ylabel('평균 가중치')
+            ax.set_xlabel('팩터')
+            plt.xticks(rotation=45, ha='right')
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+        
+        with col2:
+            st.markdown("**📊 팩터 사용 빈도**")
+            
+            # 각 팩터가 0이 아닌 가중치를 가진 날의 비율
+            usage_freq = (weights_df != 0).mean().sort_values(ascending=False)
+            top_usage = usage_freq.head(10)
+            
+            fig, ax = plt.subplots(figsize=(8, 6))
+            top_usage.plot(kind='bar', ax=ax, color='lightgreen', alpha=0.8)
+            ax.set_title('팩터별 사용 빈도')
+            ax.set_ylabel('사용 비율')
+            ax.set_xlabel('팩터')
+            plt.xticks(rotation=45, ha='right')
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+        
+        # 팩터별 상세 정보
+        st.markdown("**📋 팩터별 상세 통계**")
+        
+        factor_stats = []
+        for factor in avg_weights.head(10).index:
+            factor_weights = weights_df[factor]
+            factor_stats.append({
+                '팩터명': factor,
+                '평균 가중치': f"{avg_weights[factor]:.4f}",
+                '사용 빈도': f"{usage_freq[factor]:.1%}",
+                '최대 가중치': f"{factor_weights.abs().max():.4f}",
+                '표준편차': f"{factor_weights.std():.4f}"
+            })
+        
+        factor_stats_df = pd.DataFrame(factor_stats)
+        st.dataframe(factor_stats_df, use_container_width=True)
+    
+    def _render_risk_analysis(self, results: Dict[str, Any]):
+        """위험 분석 렌더링"""
+        backtest_results = results.get('backtest_results')
+        if not backtest_results:
+            st.warning("백테스팅 결과가 없습니다.")
+            return
+        
+        returns = backtest_results['portfolio_returns']
+        cumulative = backtest_results['cumulative_returns']
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**📉 드로우다운 분석**")
+            
+            # 드로우다운 계산
+            running_max = cumulative.expanding().max()
+            drawdown = (cumulative - running_max) / running_max
+            
+            fig, ax = plt.subplots(figsize=(10, 6))
+            drawdown.plot(ax=ax, color='red', alpha=0.7)
+            ax.fill_between(drawdown.index, drawdown, 0, alpha=0.3, color='red')
+            ax.set_title('포트폴리오 드로우다운')
+            ax.set_ylabel('드로우다운 (%)')
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+            
+            # 드로우다운 통계
+            st.markdown("**드로우다운 통계**")
+            dd_stats = {
+                '최대 드로우다운': f"{drawdown.min():.2%}",
+                '평균 드로우다운': f"{drawdown[drawdown < 0].mean():.2%}",
+                '드로우다운 지속 기간': f"{(drawdown < -0.05).sum()}일",
+                '회복 기간 (추정)': f"{max(0, (drawdown < -0.01).sum() * 0.5):.0f}일"
+            }
+            
+            for stat, value in dd_stats.items():
+                st.write(f"• {stat}: {value}")
+        
+        with col2:
+            st.markdown("**📊 수익률 분포 분석**")
+            
+            # 수익률 히스토그램
+            fig, ax = plt.subplots(figsize=(8, 6))
+            returns.hist(bins=50, ax=ax, alpha=0.7, density=True, color='steelblue')
+            ax.axvline(returns.mean(), color='red', linestyle='--', 
+                      label=f'평균: {returns.mean():.4f}')
+            ax.axvline(returns.quantile(0.05), color='orange', linestyle='--', 
+                      label=f'5% VaR: {returns.quantile(0.05):.4f}')
+            ax.set_title('일별 수익률 분포')
+            ax.set_xlabel('일별 수익률')
+            ax.set_ylabel('확률 밀도')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+            
+            # 위험 지표
+            st.markdown("**위험 지표**")
+            var_95 = returns.quantile(0.05)
+            skewness = returns.skew()
+            kurtosis = returns.kurtosis()
+            
+            risk_metrics = {
+                '일일 VaR (95%)': f"{var_95:.2%}",
+                '연환산 VaR': f"{var_95 * np.sqrt(252):.2%}",
+                '왜도 (Skewness)': f"{skewness:.3f}",
+                '첨도 (Kurtosis)': f"{kurtosis:.3f}",
+                '하방 편차': f"{returns[returns < 0].std() * np.sqrt(252):.2%}"
+            }
+            
+            for metric, value in risk_metrics.items():
+                st.write(f"• {metric}: {value}")
 
 # 애플리케이션 실행
 if __name__ == "__main__":
