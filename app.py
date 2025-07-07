@@ -12,8 +12,6 @@ from data_handler import DataHandler
 from models import ModelTrainer
 from qlib_handler import QlibHandler
 from alpha_factors import AlphaFactorEngine
-from portfolio_backtester import PortfolioBacktester, FactorBacktester
-from mega_alpha_engine import MegaAlphaEngine, MegaAlphaConfig
 from font_config import apply_korean_style
 from utils import (
     show_dataframe_info, 
@@ -23,7 +21,6 @@ from utils import (
     delete_factor_from_zoo,
     save_factor_to_zoo,
     analyze_factor_performance_text,
-    analyze_backtest_performance_text
 )
 from formula_pipeline import FormulaPipeline  # 파일 상단 import 추가
 
@@ -128,7 +125,6 @@ class AlphaForgeApp:
             # 단계별 상태 표시
             step1_status = "✅" if st.session_state.get('data_loaded', False) else "⏳"
             step2_status = "✅" if st.session_state.get('factor_generated', False) else "⏳"
-            step3_status = "✅" if st.session_state.get('backtest_completed', False) else "⏳"
             
             st.markdown(f"""
             {step1_status} **1단계: 데이터 준비**
@@ -138,19 +134,15 @@ class AlphaForgeApp:
             {step2_status} **2단계: 팩터 생성**
             - 알파 팩터 계산
             - IC 기반 성능 분석
-            
-            {step3_status} **3단계: 백테스팅**
-            - 포트폴리오 성과 분석
-            - 리스크 지표 계산
+            - 팩터 성능 검증
             """)
             
             # 전체 진행률 표시
             completed_steps = sum([
                 st.session_state.get('data_loaded', False),
-                st.session_state.get('factor_generated', False),
-                st.session_state.get('backtest_completed', False)
+                st.session_state.get('factor_generated', False)
             ])
-            progress = completed_steps / 3
+            progress = completed_steps / 2
             st.progress(progress)
             st.caption(f"진행률: {progress:.1%}")
             
@@ -217,13 +209,12 @@ class AlphaForgeApp:
         
         st.header("2. 🎯 알파 팩터 생성")
         
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📊 통계/기술적 팩터", 
             "🧠 딥러닝 팩터", 
             "📝 공식 기반 팩터", 
             "🦁 팩터 Zoo", 
-            "⚡ 선형/비선형 비교",
-            "🚀 메가-알파 백테스팅"
+            "⚡ 선형/비선형 비교"
         ])
         with tab1:
             self._render_statistical_factor_section()
@@ -235,11 +226,6 @@ class AlphaForgeApp:
             self._render_factor_zoo_section()
         with tab5:
             self._render_linear_vs_nonlinear_section()
-        with tab6:
-            self._render_mega_alpha_backtesting_section()
-        
-        # 3. Qlib 백테스팅 섹션
-        self._render_backtest_section()
         
         # 4. 설명 섹션
         self._render_explanation_section()
@@ -253,8 +239,6 @@ class AlphaForgeApp:
             current_step = 1
         if st.session_state.get('factor_generated', False):
             current_step = 2
-        if st.session_state.get('backtest_completed', False):
-            current_step = 3
         
         with st.expander("🚀 AlphaFactors 사용법 가이드", expanded=current_step == 0):
             
@@ -309,11 +293,7 @@ class AlphaForgeApp:
                 - 통계/기술적 팩터 또는 딥러닝 팩터 선택
                 - IC 기반 동적 가중치 또는 고정 가중치 선택
                 - 팩터 성능 분석 및 검증 (IC, ICIR)
-                
-                **3단계: 백테스팅** ⏳
-                - 포트폴리오 백테스팅 및 성과 분석
-                - 리스크 지표 및 수익률 분석
-                - 결과 시각화 및 리포트 생성
+                - 팩터 Zoo 저장 및 관리
                 """)
                 
                 # 기술 스택 설명
@@ -329,9 +309,9 @@ class AlphaForgeApp:
                 - `torch`: 딥러닝 모델 (MLP, LSTM, Transformer)
                 - `scipy`: 통계적 계산 및 최적화
                 
-                **백테스팅**
-                - 커스텀 포트폴리오 백테스터: 전문적인 성과 분석
-                - `matplotlib`, `seaborn`: 시각화
+                **시각화 및 분석**
+                - `matplotlib`, `seaborn`: 차트 및 그래프 시각화
+                - IC/ICIR 분석 및 성능 평가
                 
                 **웹 인터페이스**
                 - `streamlit`: 대화형 웹 애플리케이션
@@ -1019,559 +999,10 @@ class AlphaForgeApp:
         with st.expander("🤖 AI 해석 결과", expanded=True):
             st.info(analyze_factor_performance_text(performance, llm_api_key=None if not st.session_state['use_llm_analysis'] else 'env'))
     
-    def _render_backtest_section(self):
-        """백테스팅 섹션 렌더링"""
-        st.header("3. 📊 포트폴리오 백테스팅")
-        
-        if not st.session_state.get('factor_generated', False):
-            st.warning("먼저 알파 팩터를 생성하세요.")
-            return
-        
-        # 백테스팅 설정
-        st.subheader("🔧 백테스팅 설정")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # 백테스팅 파라미터는 하단에서 설정됩니다
-            st.info("💡 이제 Qlib 없이 더 간단하고 안정적인 백테스팅을 제공합니다.")
-        
-        with col2:
-            strategy_type = st.selectbox(
-                "전략 유형",
-                [
-                    "Long Only (매수 전용)",
-                    "Long-Short (롱숏)",
-                    "Market Neutral (시장중립)",
-                    "Pairs Trading (페어 트레이딩)",
-                    "Leveraged (레버리지)",
-                    "Sector Rotation (섹터 로테이션)",
-                    "Dynamic Allocation (동적 자산배분)"
-                ],
-                help="대표적인 포트폴리오 전략 유형을 선택하세요."
-            )
-        
-        # 레버리지 배수
-        leverage = 1.0
-        if strategy_type == "Leveraged (레버리지)":
-            leverage = st.slider("레버리지 배수", 1.0, 3.0, 2.0, 0.1)
-        # 섹터 로테이션: 섹터 리스트/맵 예시
-        sector_list = ["IT", "금융", "헬스케어", "산업재"]
-        sector_map = {}
-        available_names = list(st.session_state.combined_factor_df.columns) if 'combined_factor_df' in st.session_state else []
-        for i, name in enumerate(available_names):
-            sector_map[name] = sector_list[i % len(sector_list)]
-        selected_sectors = []
-        if strategy_type == "Sector Rotation (섹터 로테이션)":
-            selected_sectors = st.multiselect("투자할 섹터 선택", sector_list, default=sector_list[:1])
-        # 다이나믹 배분 방식
-        dynamic_mode = None
-        if strategy_type == "Dynamic Allocation (동적 자산배분)":
-            dynamic_mode = st.selectbox("동적 배분 방식", ["신호 강도 기반", "변동성 기반"])
-        # Pairs Trading 선택 시 쌍 선택 UI 노출
-        pair_selection = None
-        if strategy_type == "Pairs Trading (페어 트레이딩)":
-            pair_selection = st.multiselect("페어로 비교할 종목 2개 선택", available_names, max_selections=2)
-            if len(pair_selection) != 2:
-                st.warning("페어 트레이딩은 반드시 2개 종목을 선택해야 합니다.")
-        
-        # 추가 설정
-        col3, col4, col5 = st.columns(3)
-        
-        with col3:
-            rebalance_freq = st.selectbox(
-                "리밸런싱 주기",
-                [
-                    ("daily", "일간"),
-                    ("weekly", "주간"),
-                    ("monthly", "월간"),
-                    ("quarterly", "분기"),  # 분기 추가
-                    ("yearly", "연"),        # 연 추가
-                ],
-                format_func=lambda x: x[1],
-                index=0,
-                help="포트폴리오 재조정 빈도"
-            )[0]  # 실제 값은 튜플의 첫 번째 원소
-        
-        with col4:
-            transaction_cost = st.slider(
-                "거래비용 (bps)",
-                min_value=0, max_value=50, value=10,
-                help="거래 시 발생하는 비용 (1bps = 0.01%)"
-            )
-        
-        with col5:
-            max_position = st.slider(
-                "최대 종목 비중 (%)",
-                min_value=5, max_value=50, value=10,
-                help="단일 종목의 최대 포트폴리오 비중"
-            ) / 100
-        
-        # 백테스팅 실행
-        if st.button("🚀 백테스팅 실행", type="primary"):
-            # 모든 옵션을 세션 상태에 저장 (항상 최신값 반영)
-            st.session_state['strategy_type'] = strategy_type
-            st.session_state['leverage'] = leverage
-            st.session_state['pair_selection'] = pair_selection
-            st.session_state['sector_map'] = sector_map
-            st.session_state['selected_sectors'] = selected_sectors
-            st.session_state['dynamic_mode'] = dynamic_mode
-            # 필수 옵션 체크 및 안내
-            if strategy_type == "Pairs Trading (페어 트레이딩)" and (not pair_selection or len(pair_selection) != 2):
-                st.error("페어 트레이딩은 반드시 2개 종목을 선택해야 합니다.")
-            elif strategy_type == "Sector Rotation (섹터 로테이션)" and (not selected_sectors or len(selected_sectors) == 0):
-                st.error("섹터 로테이션은 1개 이상의 섹터를 선택해야 합니다.")
-            else:
-                # 백테스팅 실행
-                self._run_custom_backtest(
-                    strategy_type == "Long Only (매수 전용)",
-                    rebalance_freq, transaction_cost, max_position
-                )
-    
-    def _run_custom_backtest(self, long_only: bool, rebalance_freq: str, 
-                                  transaction_cost: float, max_position: float):
-        """사용자 정의 상세 분석 백테스팅 실행 (전략 유형별 분기)"""
-        try:
-            universe_data = st.session_state.universe_data
-            volume_data = st.session_state.get('volume_data')
-            combined_factor_df = st.session_state.combined_factor_df
-            individual_factors = st.session_state.individual_factors
-            # 전략 유형/옵션 가져오기
-            strategy_type = st.session_state.get('strategy_type', "Long Only (매수 전용)")
-            pair_selection = st.session_state.get('pair_selection', None)
-            leverage = st.session_state.get('leverage', 1.0)
-            sector_map = st.session_state.get('sector_map', None)
-            selected_sectors = st.session_state.get('selected_sectors', None)
-            dynamic_mode = st.session_state.get('dynamic_mode', None)
-            # 포트폴리오 백테스터 초기화
-            backtester = PortfolioBacktester(universe_data, volume_data)
-            # 단일 통합 팩터 백테스팅
-            st.subheader("🎯 통합 알파 팩터 백테스팅")
-            with st.spinner("통합 팩터 백테스팅 실행 중..."):
-                # 전략별 포트폴리오 구성 함수
-                def get_portfolio_weights(factor_scores, strategy_type, top_pct=0.2, pair_selection=None, col_names=None, leverage=1.0, sector_map=None, selected_sectors=None, dynamic_mode=None):
-                    import numpy as np
-                    n = len(factor_scores)
-                    sorted_idx = np.argsort(factor_scores)[::-1]
-                    weights = np.zeros(n)
-                    if strategy_type == "Long Only (매수 전용)":
-                        top_n = int(n * top_pct)
-                        weights[sorted_idx[:top_n]] = 1 / top_n
-                    elif strategy_type == "Long-Short (롱숏)":
-                        top_n = int(n * top_pct)
-                        bottom_n = int(n * top_pct)
-                        weights[sorted_idx[:top_n]] = 1 / (2 * top_n)
-                        weights[sorted_idx[-bottom_n:]] = -1 / (2 * bottom_n)
-                    elif strategy_type == "Market Neutral (시장중립)":
-                        top_n = int(n * top_pct)
-                        bottom_n = int(n * top_pct)
-                        weights[sorted_idx[:top_n]] = 0.5 / top_n
-                        weights[sorted_idx[-bottom_n:]] = -0.5 / bottom_n
-                        # 롱/숏 합이 0이 되도록 정규화
-                        weights = weights - weights.mean()
-                    elif strategy_type == "Pairs Trading (페어 트레이딩)":
-                        # 두 종목만 롱/숏, 나머지는 0
-                        if pair_selection and col_names:
-                            idx1 = col_names.index(pair_selection[0])
-                            idx2 = col_names.index(pair_selection[1])
-                            weights[idx1] = 0.5
-                            weights[idx2] = -0.5
-                    elif strategy_type == "Leveraged (레버리지)":
-                        # 롱온리+레버리지 예시
-                        top_n = int(n * top_pct)
-                        weights[sorted_idx[:top_n]] = leverage / top_n
-                    elif strategy_type == "Sector Rotation (섹터 로테이션)":
-                        # 섹터 필터링
-                        if sector_map and selected_sectors:
-                            sector_mask = np.array([sector_map.get(name, None) in selected_sectors for name in col_names])
-                            sector_scores = factor_scores[sector_mask]
-                            sector_names = [name for name, flag in zip(col_names, sector_mask) if flag]
-                            if len(sector_scores) > 0:
-                                top_n = int(len(sector_scores) * top_pct)
-                                sector_sorted_idx = np.argsort(sector_scores)[::-1]
-                                for i in sector_sorted_idx[:top_n]:
-                                    idx = col_names.index(sector_names[i])
-                                    weights[idx] = 1 / top_n
-                    elif strategy_type == "Dynamic Allocation (동적 자산배분)":
-                        # 예시: 팩터 신호 강도(분산) 기반 레버리지/현금 비중 조절
-                        signal_strength = np.std(factor_scores)
-                        dyn_leverage = 1.0 + min(signal_strength * 5, 2.0)  # 신호 강하면 최대 3배
-                        top_n = int(n * top_pct)
-                        weights[sorted_idx[:top_n]] = dyn_leverage / top_n
-                    return weights
-                # 실제 백테스트 실행 (날짜별 반복)
-                import numpy as np
-                returns = []
-                for date, row in combined_factor_df.iterrows():
-                    factor_scores = row.values
-                    col_names = list(combined_factor_df.columns)
-                    weights = get_portfolio_weights(
-                        factor_scores, strategy_type,
-                        pair_selection=pair_selection, col_names=col_names,
-                        leverage=leverage, sector_map=sector_map, selected_sectors=selected_sectors, dynamic_mode=dynamic_mode
-                    )
-                    # 수익률 계산: 실제 구현에서는 universe_data에서 해당 날짜의 수익률 사용
-                    if date in universe_data.index:
-                        daily_ret = np.nansum(weights * universe_data.loc[date].values)
-                        returns.append(daily_ret)
-                # 누적 수익률 등 성과 계산(간단 예시)
-                returns = np.array(returns)
-                cumulative = np.cumprod(1 + returns) - 1
-                import matplotlib.pyplot as plt
-                fig, ax = plt.subplots(figsize=(10, 5))
-                ax.plot(cumulative, label="누적 수익률")
-                ax.set_title(f"{strategy_type} 전략 누적 수익률")
-                ax.legend()
-                st.pyplot(fig)
-                plt.close(fig)
-                # 성과 리포트(간단)
-                st.subheader("📈 성과 리포트 (간단)")
-                st.write(f"최종 누적 수익률: {cumulative[-1]:.2%}")
-                st.write(f"평균 일간 수익률: {returns.mean():.4f}")
-                st.write(f"일간 수익률 표준편차: {returns.std():.4f}")
-                # 세션에 결과 저장
-                st.session_state.dl_backtest_results = {
-                    'returns': returns,
-                    'cumulative': cumulative,
-                    'strategy_type': strategy_type
-                }
-        except Exception as e:
-            st.error(f"상세 분석 백테스팅 실행 중 오류: {e}")
-            import traceback
-            st.code(traceback.format_exc())
-    
-    def _compare_individual_factors(self, individual_factors: Dict, long_only: bool,
-                                  rebalance_freq: str, transaction_cost: float, max_position: float):
-        """개별 팩터들 성과 비교"""
-        
-        universe_data = st.session_state.universe_data
-        volume_data = st.session_state.get('volume_data')
-        
-        # 확장된 팩터명 매핑
-        factor_names_ko = {
-            'momentum': '모멘텀',
-            'reversal': '반전',
-            'volatility': '저변동성',
-            'volume': '거래량',
-            'rsi': 'RSI',
-            'price_to_ma': '이동평균 대비 가격',
-            'bollinger_band': '볼린저 밴드',
-            'macd': 'MACD',
-            'stochastic': '스토캐스틱',
-            'williams_r': 'Williams %R',
-            'cci': 'CCI',
-            'money_flow': 'Money Flow Index',
-            'aroon': 'Aroon',
-            'obv': 'OBV',
-            'volume_price_trend': 'VPT',
-            'chaikin_money_flow': 'Chaikin Money Flow',
-            'force_index': 'Force Index',
-            'ease_of_movement': 'Ease of Movement',
-            'accumulation_distribution': 'Accumulation/Distribution',
-            'dl_factor': '딥러닝 팩터'
-        }
-        
-        factor_backtester = FactorBacktester(universe_data, volume_data)
-        
-        with st.spinner("개별 팩터들 백테스팅 비교 중..."):
-            comparison_results = factor_backtester.compare_factors(
-                individual_factors, factor_names_ko
-            )
-        
-        if comparison_results:
-            st.session_state.factor_comparison_results = comparison_results
-            st.success("✅ 개별 팩터 성과 비교 완료!")
-            
-            # 추가 분석 및 시각화
-            self._display_detailed_factor_comparison(comparison_results)
-        else:
-            st.error("❌ 팩터 비교에 실패했습니다.")
-    
-    def _display_detailed_factor_comparison(self, comparison_results: Dict[str, Dict]):
-        """상세한 팩터 비교 결과 표시 (가독성/설명 강화)"""
-        st.subheader("🔍 상세 팩터 분석")
-        # 1. 팩터별 성과 요약
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            best_factor = max(comparison_results.items(), 
-                            key=lambda x: x[1]['performance_metrics']['sharpe_ratio'])
-            best_sharpe = best_factor[1]['performance_metrics']['sharpe_ratio']
-            st.metric("최고 샤프 비율", f"{best_sharpe:.3f}", f"({best_factor[0]})")
-            st.markdown(f"<span style='font-size:20px; font-weight:bold; color:#1565c0'>최고 샤프 비율: {best_sharpe:.3f}</span>", unsafe_allow_html=True)
-            st.caption("샤프 비율: 위험 대비 수익률 (높을수록 우수)")
-        with col2:
-            best_return = max(comparison_results.items(), 
-                            key=lambda x: x[1]['performance_metrics']['annualized_return'])
-            st.metric("최고 연간 수익률", f"{best_return[1]['performance_metrics']['annualized_return']:.2%}", f"({best_return[0]})")
-            st.markdown(f"<span style='font-size:20px; font-weight:bold; color:#1565c0'>최고 연간 수익률: {best_return[1]['performance_metrics']['annualized_return']:.2%}</span>", unsafe_allow_html=True)
-            st.caption("연간 수익률: 1년 기준 환산 수익률")
-        with col3:
-            best_win_rate = max(comparison_results.items(), 
-                            key=lambda x: x[1]['performance_metrics']['win_rate'])
-            st.metric("최고 승률", f"{best_win_rate[1]['performance_metrics']['win_rate']:.2%}", f"({best_win_rate[0]})")
-            st.markdown(f"<span style='font-size:20px; font-weight:bold; color:#1565c0'>최고 승률: {best_win_rate[1]['performance_metrics']['win_rate']:.2%}</span>", unsafe_allow_html=True)
-            st.caption("승률: 투자 기간 중 수익이 난 비율")
-        # 2. 팩터별 상세 성과 테이블
-        st.subheader("📊 팩터별 상세 성과 지표")
-        detailed_data = []
-        for factor_name, result in comparison_results.items():
-            metrics = result['performance_metrics']
-            detailed_data.append({
-                '팩터명': factor_name,
-                '총 수익률': f"{metrics['total_return']:.2%}",
-                '연간 수익률': f"{metrics['annualized_return']:.2%}",
-                '연간 변동성': f"{metrics['annualized_volatility']:.2%}",
-                '샤프 비율': f"{metrics['sharpe_ratio']:.3f}",
-                '최대 손실폭': f"{metrics['max_drawdown']:.2%}",
-                '승률': f"{metrics['win_rate']:.2%}",
-                '정보 비율': f"{metrics['information_ratio']:.3f}",
-                '칼마 비율': f"{metrics['calmar_ratio']:.3f}",
-                '벤치마크 대비 초과수익': f"{metrics['excess_return']:.2%}"
-            })
-        detailed_df = pd.DataFrame(detailed_data)
-        # 표 수치 가독성 개선: 모든 수치형 컬럼 소수점 4자리로 포맷
-        for col in detailed_df.columns:
-            if col != '팩터명':
-                detailed_df[col] = detailed_df[col].astype(str)
-        if isinstance(detailed_df, pd.DataFrame):
-            for col in detailed_df.columns:
-                if detailed_df[col].dtype == 'object':
-                    detailed_df[col] = detailed_df[col].astype(str)
-        st.dataframe(detailed_df, use_container_width=True)
-        
-        # 3. 팩터별 월별 수익률 히트맵
-        st.subheader("📅 팩터별 월별 수익률")
-        
-        # 월별 수익률 계산
-        monthly_returns_data = {}
-        for factor_name, result in comparison_results.items():
-            monthly_returns = result['portfolio_returns'].resample('M').apply(lambda x: (1 + x).prod() - 1)
-            monthly_returns_data[factor_name] = monthly_returns
-        
-        # 히트맵 생성
-        if monthly_returns_data:
-            monthly_df = pd.DataFrame(monthly_returns_data)
-            
-            fig, ax = plt.subplots(figsize=(12, 8))
-            sns.heatmap(monthly_df.T, annot=True, fmt='.2%', cmap='RdYlGn', center=0, ax=ax)
-            ax.set_title('팩터별 월별 수익률 히트맵', fontsize=14)
-            ax.set_xlabel('월', fontsize=12)
-            ax.set_ylabel('팩터', fontsize=12)
-            
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close(fig)
-        
-        # 4. 팩터별 상관관계 분석
-        st.subheader("🔗 팩터별 상관관계 분석")
-        
-        # 수익률 상관관계 계산
-        returns_data = {}
-        for factor_name, result in comparison_results.items():
-            returns_data[factor_name] = result['portfolio_returns']
-        
-        returns_df = pd.DataFrame(returns_data)
-        correlation_matrix = returns_df.corr()
-        
-        fig, ax = plt.subplots(figsize=(10, 8))
-        sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', center=0, 
-                   square=True, ax=ax, fmt='.2f')
-        ax.set_title('팩터별 수익률 상관관계', fontsize=14)
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
-        
-        # 5. 팩터별 드로우다운 비교
-        st.subheader("📉 팩터별 드로우다운 비교")
-        
-        fig, ax = plt.subplots(figsize=(12, 8))
-        
-        for factor_name, result in comparison_results.items():
-            cumulative = result['cumulative_returns']
-            running_max = cumulative.expanding().max()
-            drawdown = (cumulative - running_max) / running_max
-            drawdown.plot(ax=ax, label=factor_name, alpha=0.7)
-        
-        ax.set_title('팩터별 드로우다운 비교', fontsize=14)
-        ax.set_ylabel('드로우다운 (%)', fontsize=12)
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
-        ax.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
-        
-        # 6. 팩터별 수익률 분포 비교
-        st.subheader("📊 팩터별 수익률 분포 비교")
-        
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-        axes = axes.flatten()
-        
-        for i, (factor_name, result) in enumerate(comparison_results.items()):
-            if i < 4:  # 최대 4개 팩터만 표시
-                returns = result['portfolio_returns']
-                axes[i].hist(returns, bins=30, alpha=0.7, density=True)
-                axes[i].axvline(returns.mean(), color='red', linestyle='--', 
-                               label=f'평균: {returns.mean():.4f}')
-                axes[i].set_title(f'{factor_name} 수익률 분포', fontsize=12)
-                axes[i].set_xlabel('일별 수익률', fontsize=10)
-                axes[i].set_ylabel('확률 밀도', fontsize=10)
-                axes[i].legend()
-                axes[i].grid(True, alpha=0.3)
-        
-        # 빈 서브플롯 숨기기
-        for i in range(len(comparison_results), 4):
-            axes[i].set_visible(False)
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
-        
-        # 7. 팩터별 성과 요약 및 권장사항
-        st.subheader("💡 팩터별 성과 요약 및 권장사항")
-        
-        # 최고 성과 팩터들
-        best_sharpe = max(comparison_results.items(), 
-                         key=lambda x: x[1]['performance_metrics']['sharpe_ratio'])
-        best_return = max(comparison_results.items(), 
-                         key=lambda x: x[1]['performance_metrics']['annualized_return'])
-        best_win_rate = max(comparison_results.items(), 
-                           key=lambda x: x[1]['performance_metrics']['win_rate'])
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**🏆 최고 성과 팩터**")
-            st.write(f"• **최고 샤프 비율**: {best_sharpe[0]} ({best_sharpe[1]['performance_metrics']['sharpe_ratio']:.3f})")
-            st.write(f"• **최고 수익률**: {best_return[0]} ({best_return[1]['performance_metrics']['annualized_return']:.2%})")
-            st.write(f"• **최고 승률**: {best_win_rate[0]} ({best_win_rate[1]['performance_metrics']['win_rate']:.2%})")
-        
-        with col2:
-            st.markdown("**💡 투자 권장사항**")
-            st.write("• **보수적 투자**: 샤프 비율이 높은 팩터 선택")
-            st.write("• **공격적 투자**: 수익률이 높은 팩터 선택")
-            st.write("• **안정적 투자**: 승률이 높은 팩터 선택")
-            st.write("• **다각화**: 상관관계가 낮은 팩터들 조합")
-        
-        # 8. 결과 다운로드 옵션
-        st.subheader("📥 결과 다운로드")
-        
-        if st.button("📊 팩터 비교 결과 다운로드"):
-            self._export_factor_comparison_results(comparison_results)
-    
-    def _export_factor_comparison_results(self, comparison_results: Dict[str, Dict]):
-        """팩터 비교 결과 내보내기"""
-        
-        try:
-            import io
-            
-            buffer = io.BytesIO()
-            
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                # 1. 성과 지표 요약
-                summary_data = []
-                for factor_name, result in comparison_results.items():
-                    metrics = result['performance_metrics']
-                    summary_data.append({
-                        '팩터명': factor_name,
-                        '총 수익률': metrics['total_return'],
-                        '연간 수익률': metrics['annualized_return'],
-                        '연간 변동성': metrics['annualized_volatility'],
-                        '샤프 비율': metrics['sharpe_ratio'],
-                        '최대 손실폭': metrics['max_drawdown'],
-                        '승률': metrics['win_rate'],
-                        '정보 비율': metrics['information_ratio'],
-                        '칼마 비율': metrics['calmar_ratio'],
-                        '벤치마크 대비 초과수익': metrics['excess_return']
-                    })
-                
-                summary_df = pd.DataFrame(summary_data)
-                summary_df.to_excel(writer, sheet_name='성과 지표 요약', index=False)
-                
-                # 2. 팩터별 수익률
-                returns_data = {}
-                for factor_name, result in comparison_results.items():
-                    returns_data[factor_name] = result['portfolio_returns']
-                
-                returns_df = pd.DataFrame(returns_data)
-                returns_df.to_excel(writer, sheet_name='팩터별 수익률')
-                
-                # 3. 팩터별 누적 수익률
-                cumulative_data = {}
-                for factor_name, result in comparison_results.items():
-                    cumulative_data[factor_name] = result['cumulative_returns']
-                
-                cumulative_df = pd.DataFrame(cumulative_data)
-                cumulative_df.to_excel(writer, sheet_name='팩터별 누적 수익률')
-                
-                # 4. 상관관계 매트릭스
-                correlation_matrix = returns_df.corr()
-                correlation_matrix.to_excel(writer, sheet_name='상관관계 매트릭스')
-            
-            buffer.seek(0)
-            
-            filename = f"factor_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            
-            st.download_button(
-                label="📥 Excel 파일 다운로드",
-                data=buffer.getvalue(),
-                file_name=filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-            st.success(f"✅ 팩터 비교 결과를 다운로드할 수 있습니다: {filename}")
-            
-        except Exception as e:
-            st.error(f"결과 내보내기 실패: {e}")
     
     
-    def _export_backtest_results(self, result: Dict):
-        """백테스팅 결과 내보내기"""
-        
-        try:
-            import io
-            
-            # Excel 파일로 내보내기
-            buffer = io.BytesIO()
-            
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                # 포트폴리오 수익률
-                result['portfolio_returns'].to_frame('Portfolio Returns').to_excel(
-                    writer, sheet_name='Returns'
-                )
-                
-                # 누적 수익률
-                pd.DataFrame({
-                    'Portfolio': result['cumulative_returns'],
-                    'Benchmark': result['benchmark_cumulative']
-                }).to_excel(writer, sheet_name='Cumulative Returns')
-                
-                # 성과 지표
-                metrics_df = pd.DataFrame.from_dict(
-                    result['performance_metrics'], orient='index', columns=['Value']
-                )
-                metrics_df.to_excel(writer, sheet_name='Performance Metrics')
-                
-                # 포트폴리오 가중치 (최근 30일)
-                recent_weights = result['weights'].tail(30)
-                recent_weights.to_excel(writer, sheet_name='Recent Weights')
-            
-            buffer.seek(0)
-            
-            filename = f"portfolio_backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-            
-            st.download_button(
-                label="📥 Excel 파일 다운로드",
-                data=buffer.getvalue(),
-                file_name=filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            
-            st.success(f"✅ 백테스팅 결과를 다운로드할 수 있습니다: {filename}")
-            
-        except Exception as e:
-            st.error(f"결과 내보내기 실패: {e}")
+    
+    
     
     def _render_explanation_section(self):
         """설명 섹션 렌더링"""
@@ -2080,13 +1511,8 @@ class AlphaForgeApp:
                     st.session_state.factor_generated = True
                     st.success(f"{factor_name} 팩터를 불러왔습니다! 분석/백테스트 탭에서 바로 사용 가능합니다.")
             with col2:
-                if st.button("📊 백테스트 실행", key=f"backtest_{factor_name}"):
-                    st.session_state.custom_factor = factor_data['factor']
-                    st.session_state.combined_factor_df = factor_data['factor']
-                    st.session_state.factor_performance = meta.get('performance', {})
-                    st.session_state.factor_generated = True
-                    st.success(f"{factor_name} 팩터로 백테스트를 실행할 수 있습니다!")
-                    st.markdown('<script>document.querySelector("[data-testid=stTabs]").scrollIntoView();</script>', unsafe_allow_html=True)
+                # 팩터 정보 표시
+                st.info(f"📊 IC: {meta.get('ic', 'N/A'):.4f}" if isinstance(meta.get('ic'), (int, float)) else "📊 IC: N/A")
             with col3:
                 if st.button("🗑️ 이 팩터 삭제", type="secondary", key=f"delete_{factor_name}"):
                     delete_factor_from_zoo(factor_name)
@@ -2687,145 +2113,6 @@ class AlphaForgeApp:
             st.error(f"공식 기반 팩터 생성 중 오류: {e}")
             import traceback
             st.code(traceback.format_exc())
-    
-    def _render_mega_alpha_backtesting_section(self):
-        """메가-알파 백테스팅 섹션 렌더링"""
-        
-        st.markdown("### 🚀 메가-알파 시뮬레이션")
-        st.markdown("""
-        **메가-알파 백테스팅**은 여러 팩터를 동적으로 결합하여 최적의 포트폴리오를 구성하는 고급 백테스팅 시스템입니다.
-        - 📊 **동적 팩터 결합**: IC 기반으로 팩터를 선택하고 가중치를 조정
-        - 🎯 **적응형 리밸런싱**: 시장 상황에 따라 포트폴리오 구성을 최적화  
-        - 📈 **성과 분석**: 누적 수익률, 샤프 비율, 최대 손실폭 등 종합 분석
-        - 🔍 **일별 분석**: 특정 날짜의 팩터 구성과 가중치를 상세 분석
-        """)
-        
-        if not st.session_state.universe_loaded:
-            st.warning("⚠️ 먼저 유니버스 데이터를 로드해주세요.")
-            return
-        
-        # 하이퍼파라미터 설정
-        st.markdown("#### ⚙️ 메가-알파 설정")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("**📊 팩터 풀 설정**")
-            factor_pool_size = st.slider("팩터 풀 크기", 3, 15, 8, help="동시에 사용할 최대 팩터 개수")
-            ic_threshold = st.slider("IC 임계값", 0.01, 0.05, 0.02, 0.01, help="팩터 선택을 위한 최소 IC 값")
-            
-        with col2:
-            st.markdown("**⏰ 리밸런싱 설정**")
-            rebalance_freq = st.selectbox("리밸런싱 빈도", 
-                                        ["daily", "weekly", "monthly"], 
-                                        index=1, help="포트폴리오 재구성 주기")
-            lookback_window = st.slider("IC 계산 기간", 30, 120, 60, help="IC 계산에 사용할 과거 데이터 기간(일)")
-            
-        with col3:
-            st.markdown("**💼 포트폴리오 설정**")
-            long_only = st.checkbox("롱온리 전략", True, help="매수 전용 전략 (체크 해제시 롱숏 전략)")
-            transaction_cost = st.slider("거래비용(bps)", 5, 50, 10, help="거래 시 발생하는 비용 (1bps = 0.01%)")
-            max_position = st.slider("최대 종목 비중", 0.05, 0.3, 0.1, 0.01, help="단일 종목 최대 투자 비중")
-        
-        # 메가-알파 설정 객체 생성
-        mega_alpha_config = MegaAlphaConfig(
-            factor_pool_size=factor_pool_size,
-            ic_threshold=ic_threshold,
-            rebalance_frequency=rebalance_freq,
-            lookback_window=lookback_window,
-            long_only=long_only,
-            transaction_cost_bps=transaction_cost,
-            max_position_weight=max_position
-        )
-        
-        # 메가-알파 실행 버튼
-        if st.button("🚀 메가-알파 시뮬레이션 실행", type="primary", use_container_width=True):
-            try:
-                # 데이터 확인 및 자동 로드
-                universe_data = st.session_state.get('universe_data')
-                volume_data = st.session_state.get('volume_data')
-                
-                if universe_data is None or universe_data.empty:
-                    st.warning("⚠️ 유니버스 데이터가 없습니다. 먼저 데이터를 로드해주세요.")
-                    
-                    # 자동 데이터 로드 시도
-                    if st.button("🔄 샘플 데이터 자동 로드 (FAANG 주식)", key="auto_load_mega_alpha"):
-                        with st.spinner("샘플 데이터 로딩 중..."):
-                            # 기본 설정으로 FAANG 주식 데이터 로드
-                            import pandas as pd
-                            from datetime import datetime, timedelta
-                            
-                            tickers = ['AAPL', 'GOOGL', 'META', 'AMZN', 'NFLX']
-                            end_date = datetime.now()
-                            start_date = end_date - timedelta(days=365 * 2)  # 2년 데이터
-                            
-                            universe_data, volume_data = self.data_handler.download_universe_data(
-                                tickers, 
-                                pd.Timestamp(start_date), 
-                                pd.Timestamp(end_date)
-                            )
-                            
-                            if universe_data is not None and not universe_data.empty:
-                                st.session_state.universe_data = universe_data
-                                st.session_state.volume_data = volume_data
-                                st.session_state.universe_loaded = True
-                                st.success("✅ 샘플 데이터 로드 완료!")
-                                st.rerun()
-                            else:
-                                st.error("❌ 데이터 로드에 실패했습니다.")
-                    return
-                
-                # 메가-알파 엔진 초기화
-                mega_alpha_engine = MegaAlphaEngine(mega_alpha_config)
-                
-                # 시뮬레이션 실행
-                with st.spinner("메가-알파 시뮬레이션 실행 중... (수분 소요될 수 있습니다)"):
-                    results = mega_alpha_engine.run_mega_alpha_simulation(
-                        universe_data, volume_data
-                    )
-                
-                if results:
-                    st.session_state['mega_alpha_results'] = results
-                    st.session_state['mega_alpha_engine'] = mega_alpha_engine
-                    st.success("🎉 메가-알파 시뮬레이션이 완료되었습니다!")
-                    
-                    # 결과 저장 옵션
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        save_name = st.text_input("저장할 이름 (선택사항)", placeholder="예: 고성능_메가알파")
-                    with col2:
-                        st.write("")  # 공간 확보
-                        if st.button("🦁 팩터 Zoo에 저장"):
-                            suffix = f"_{save_name}" if save_name else ""
-                            mega_alpha_engine.save_mega_alpha_results(results, suffix)
-                else:
-                    st.error("메가-알파 시뮬레이션에 실패했습니다.")
-                    
-            except Exception as e:
-                st.error(f"메가-알파 시뮬레이션 중 오류가 발생했습니다: {e}")
-                import traceback
-                with st.expander("상세 오류 정보"):
-                    st.code(traceback.format_exc())
-        
-        # 기존 결과가 있다면 추가 도구만 표시 (결과 분석은 이미 MegaAlphaEngine에서 표시됨)
-        if 'mega_alpha_results' in st.session_state and st.session_state['mega_alpha_results']:
-            results = st.session_state['mega_alpha_results']
-            engine = st.session_state.get('mega_alpha_engine')
-            
-            if engine and results:
-                # 추가 분석 도구
-                st.markdown("#### 🔍 추가 분석 도구")
-                
-                analysis_tabs = st.tabs(["📈 상세 성과 분석", "🎯 팩터 기여도", "📊 위험 분석"])
-                
-                with analysis_tabs[0]:
-                    self._render_detailed_performance_analysis(results)
-                
-                with analysis_tabs[1]:
-                    self._render_factor_contribution_analysis(results)
-                
-                with analysis_tabs[2]:
-                    self._render_risk_analysis(results)
     
     def _render_detailed_performance_analysis(self, results: Dict[str, Any]):
         """상세 성과 분석 렌더링"""
