@@ -182,9 +182,10 @@ class AlphaForgeApp:
             st.metric("캐시 파일 수", cache_info['cache_files'])
             st.metric("캐시 크기", f"{cache_info['total_size']/1024/1024:.1f} MB")
             
+            # 캐시 정리 버튼 클릭 시에만 rerun (데이터/상태가 완전히 초기화되어야 하므로 필요)
             if st.button("캐시 정리"):
                 self.data_handler.clear_cache()
-                st.rerun()
+                st.rerun()  # 반드시 필요: 캐시/상태 완전 초기화
             
             # 팩터 Zoo 상태
             st.markdown("---")
@@ -541,6 +542,62 @@ class AlphaForgeApp:
                 import traceback
                 st.code(traceback.format_exc())
     
+    # --- 공통 UI 컴포넌트 함수 정의 (클래스 내부 상단에 추가) ---
+    def render_common_factor_selector(self, label: str, options: list, default: list, key: str, help_text: str) -> list:
+      """
+      공통 팩터 선택 UI
+      - label: 위젯 라벨
+      - options: 선택 가능한 팩터 리스트
+      - default: 기본 선택 팩터 리스트
+      - key: Streamlit 위젯 key
+      - help_text: 도움말
+      - return: 선택된 팩터 리스트
+      """
+      return st.multiselect(label, options, default=default, key=key, help=help_text)
+
+    def render_common_param_sliders(self, param_defs: list, tab_state: dict, key_prefix: str) -> dict:
+      """
+      공통 파라미터 슬라이더 UI
+      - param_defs: [{name, min, max, value, step, help} ...]
+      - tab_state: 탭별 상태 dict
+      - key_prefix: 위젯 key prefix
+      - return: {파라미터명: 값} dict
+      """
+      params = {}
+      for p in param_defs:
+        params[p['name']] = st.slider(
+          p['label'], p['min'], p['max'], tab_state.get(p['name'], p['value']), step=p.get('step', 1), key=f"{key_prefix}_{p['name']}", help=p.get('help', None)
+        )
+      return params
+
+    def render_common_weight_inputs(self, factor_types: list, names_ko: dict, key_prefix: str) -> dict:
+      """
+      공통 가중치 입력 UI
+      - factor_types: 팩터 코드 리스트
+      - names_ko: 한글 매핑 dict
+      - key_prefix: 위젯 key prefix
+      - return: {팩터명: 가중치} dict
+      """
+      fixed_weights = {}
+      cols = st.columns(len(factor_types))
+      for i, factor in enumerate(factor_types):
+        with cols[i]:
+          fixed_weights[factor] = st.number_input(
+            f"{names_ko.get(factor, factor)} 가중치", value=1.0, step=0.1, format="%.2f", key=f"{key_prefix}_weight_{factor}"
+          )
+      return fixed_weights
+
+    def render_common_metrics(self, metrics: dict, col_num: int = 3):
+      """
+      공통 성과 지표/메트릭 UI
+      - metrics: {지표명: 값} dict
+      - col_num: 컬럼 수
+      """
+      cols = st.columns(col_num)
+      for i, (k, v) in enumerate(metrics.items()):
+        with cols[i % col_num]:
+          st.metric(k, v)
+
     def _render_statistical_factor_section(self):
         """
         올바른 알파 팩터 생성 섹션 렌더링
@@ -633,32 +690,32 @@ class AlphaForgeApp:
         st.subheader("📊 팩터 타입 선택")
         col1, col2 = st.columns(2)
         with col1:
-            basic_factors = st.multiselect(
+            basic_factors = self.render_common_factor_selector(
                 "기본 팩터",
                 ['momentum', 'reversal', 'volatility', 'volume', 'rsi', 'price_to_ma'],
                 default=tab_state.get('selected_factors', ['momentum', 'reversal', 'volatility']),
                 key="statistical_basic_factors",
                 help="전통적인 기술적 지표 기반 팩터"
             )
-            advanced_factors = st.multiselect(
+            advanced_factors = self.render_common_factor_selector(
                 "고급 기술적 지표",
                 ['bollinger_band', 'macd', 'stochastic', 'williams_r', 'cci'],
                 key="statistical_advanced_factors",
                 help="고급 기술적 분석 지표 기반 팩터"
             )
-            volume_factors = st.multiselect(
+            volume_factors = self.render_common_factor_selector(
                 "거래량 기반 지표",
                 ['money_flow', 'obv', 'volume_price_trend', 'chaikin_money_flow', 'force_index', 'ease_of_movement', 'accumulation_distribution'],
                 key="statistical_volume_factors",
                 help="거래량과 가격의 관계를 분석하는 팩터"
             )
         with col2:
-            ic_lookback = st.slider(
-                "IC 계산 기간 (일)",
-                min_value=20, max_value=120,
-                value=tab_state.get('ic_lookback', 60),
-                key="statistical_ic_lookback",
-                help="Information Coefficient 계산을 위한 과거 기간"
+            ic_lookback = self.render_common_param_sliders(
+                [
+                    {'name': 'ic_lookback', 'label': 'IC 계산 기간 (일)', 'min': 20, 'max': 120, 'value': tab_state.get('ic_lookback', 60), 'help': "Information Coefficient 계산을 위한 과거 기간"},
+                ],
+                tab_state,
+                "statistical"
             )
             st.markdown("**⚙️ 팩터 파라미터 설정**")
             render_factor_param_sliders()
@@ -675,11 +732,11 @@ class AlphaForgeApp:
         # 카테고리별 요약
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("기본 팩터", len(basic_factors))
+            self.render_common_metrics({"기본 팩터": len(basic_factors)})
         with col2:
-            st.metric("고급 기술적 지표", len(advanced_factors))
+            self.render_common_metrics({"고급 기술적 지표": len(advanced_factors)})
         with col3:
-            st.metric("거래량 기반 지표", len(volume_factors))
+            self.render_common_metrics({"거래량 기반 지표": len(volume_factors)})
 
         # --- 가중치 방식 선택 및 입력 ---
         st.subheader("⚖️ 팩터 가중치 방식 선택")
@@ -692,7 +749,7 @@ class AlphaForgeApp:
         )
         fixed_weights = {}
         if weight_mode == "고정 가중치 직접 입력" and len(factor_types) > 1:
-            fixed_weights = render_fixed_weight_inputs(factor_types, factor_names_ko)
+            fixed_weights = self.render_common_weight_inputs(factor_types, factor_names_ko, "statistical")
 
         # --- 팩터 생성 버튼 및 로직 ---
         if st.button("🚀 알파 팩터 생성", type="primary", key="statistical_generate"):
@@ -782,13 +839,13 @@ class AlphaForgeApp:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("평균 IC", f"{performance.get('mean_ic', 0):.4f}")
+            self.render_common_metrics({"평균 IC": f"{performance.get('mean_ic', 0):.4f}"})
         with col2:
-            st.metric("ICIR", f"{performance.get('icir', 0):.4f}")
+            self.render_common_metrics({"ICIR": f"{performance.get('icir', 0):.4f}"})
         with col3:
-            st.metric("팩터 분산", f"{performance.get('factor_spread', 0):.4f}")
+            self.render_common_metrics({"팩터 분산": f"{performance.get('factor_spread', 0):.4f}"})
         with col4:
-            st.metric("데이터 포인트", f"{len(st.session_state.custom_factor):,}")
+            self.render_common_metrics({"데이터 포인트": f"{len(st.session_state.custom_factor):,}"})
         
         # 개별 팩터들 시각화 (최대 6개)
         if len(factors_dict) > 1:
@@ -1943,7 +2000,7 @@ class AlphaForgeApp:
                 if st.button("🗑️ 이 팩터 삭제", type="secondary", key=f"delete_{factor_name}"):
                     delete_factor_from_zoo(factor_name)
                     st.warning(f"{factor_name} 팩터가 삭제되었습니다. 새로고침 후 목록이 갱신됩니다.")
-                    st.rerun()
+                    st.rerun()  # 반드시 필요: 팩터 목록 즉시 갱신
         # --- 실제 렌더링 ---
         st.subheader(f"📄 {factor_name} - 상세 정보")
         render_meta_info(meta)
