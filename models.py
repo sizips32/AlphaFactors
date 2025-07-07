@@ -264,20 +264,10 @@ class ModelTrainer:
 
         # 시계열 모델을 위한 3D 텐서 변환
         if self.config.model_type in ["lstm", "gru", "transformer", "hybrid"]:
-            # (샘플 수, 특징 수) -> (샘플 수, 윈도우 크기, 특징별 특징 수)
-            # 윈도우 크기를 추정 (feature 수를 window_size로 나눔)
-            features_per_timestep = X_train_scaled.shape[1] // self.config.window_size
-            if features_per_timestep == 0:
-                features_per_timestep = 1
-            
-            # 3D로 reshape
-            try:
-                X_train_scaled = X_train_scaled.reshape(-1, self.config.window_size, features_per_timestep)
-                X_val_scaled = X_val_scaled.reshape(-1, self.config.window_size, features_per_timestep)
-            except ValueError:
-                # reshape 실패시 단순히 차원 추가
-                X_train_scaled = X_train_scaled[:, np.newaxis, :]
-                X_val_scaled = X_val_scaled[:, np.newaxis, :]
+            # 시계열 모델의 경우 (batch_size, seq_len, features)로 reshape
+            # 하지만 현재 데이터는 이미 플래튼된 특징이므로 단순히 차원 추가
+            X_train_scaled = X_train_scaled[:, np.newaxis, :]  # (batch_size, 1, features)
+            X_val_scaled = X_val_scaled[:, np.newaxis, :]
         elif self.config.model_type == "cnn1d":
             # CNN1D는 2D input을 유지 (batch_size, features)
             pass
@@ -379,14 +369,7 @@ class ModelTrainer:
         
         if self.config.model_type in ["lstm", "gru", "transformer", "hybrid"]:
             # 학습 시와 동일한 방식으로 reshape
-            features_per_timestep = X_scaled.shape[1] // self.config.window_size
-            if features_per_timestep == 0:
-                features_per_timestep = 1
-            
-            try:
-                X_scaled = X_scaled.reshape(-1, self.config.window_size, features_per_timestep)
-            except ValueError:
-                X_scaled = X_scaled[:, np.newaxis, :]
+            X_scaled = X_scaled[:, np.newaxis, :]  # (batch_size, 1, features)
         elif self.config.model_type == "cnn1d":
             # CNN1D는 2D input을 유지
             pass
