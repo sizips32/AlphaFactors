@@ -2824,18 +2824,12 @@ class AlphaForgeApp:
                 with st.expander("상세 오류 정보"):
                     st.code(traceback.format_exc())
         
-        # 기존 결과가 있다면 표시
+        # 기존 결과가 있다면 추가 도구만 표시 (결과 분석은 이미 MegaAlphaEngine에서 표시됨)
         if 'mega_alpha_results' in st.session_state and st.session_state['mega_alpha_results']:
-            st.markdown("---")
-            st.markdown("#### 📊 메가-알파 시뮬레이션 결과")
-            
             results = st.session_state['mega_alpha_results']
             engine = st.session_state.get('mega_alpha_engine')
             
             if engine and results:
-                # 성과 분석 재표시 (이미 MegaAlphaEngine에서 구현됨)
-                engine._analyze_mega_alpha_performance(results)
-                
                 # 추가 분석 도구
                 st.markdown("#### 🔍 추가 분석 도구")
                 
