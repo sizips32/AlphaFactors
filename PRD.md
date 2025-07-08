@@ -186,3 +186,83 @@ AlphaFactors의 전체 워크플로우는 다음과 같이 구성됩니다. 각 
 - 에러 발생 시 상세 메시지와 해결 방법을 UI에 안내
 - 코드 구조와 데이터 흐름을 주석과 문서로 명확히 설명
 - 팩터 Zoo, 선형/비선형 비교, Mega-Alpha 신호 등 고급 기능도 상세 주석과 예시로 안내
+
+---
+
+## 10. 파일/폴더별 역할 및 주요 함수/클래스
+
+| 파일/폴더                | 주요 역할 및 설명                                                                                 | 주요 클래스/함수 예시                      |
+|--------------------------|-----------------------------------------------------------------------------------------------|--------------------------------------------|
+| app.py                   | Streamlit 기반 메인 웹앱, 전체 UI/UX 및 워크플로우 관리                                         | AlphaForgeApp                              |
+| config.py                | 환경설정, 공통 설정값 dataclass                                                                | ModelConfig, DataConfig, QlibConfig        |
+| data_handler.py          | 주식 데이터 다운로드, 캐싱, 전처리                                                              | DataHandler, download_universe_data        |
+| alpha_factors.py         | 알파 팩터 생성 엔진, 팩터별 계산 함수                                                          | AlphaFactorEngine, calculate_all_factors   |
+| models.py                | 딥러닝/머신러닝 팩터(MLP, LSTM 등) 학습/예측                                                    | ModelTrainer, ImprovedFactorMLP 등         |
+| portfolio_backtester.py  | Qlib 기반 백테스팅, 리스크 분석                                                                | PortfolioBacktester, FactorBacktester      |
+| qlib_handler.py          | Qlib 연동, 데이터 변환, 백테스트 실행                                                          | QlibHandler                                |
+| utils.py                 | 공통 유틸리티 함수, 팩터 Zoo 관리(저장/불러오기/삭제)                                           | save_factor_to_zoo, load_factors_from_zoo  |
+| font_config.py           | 한글 폰트 설정                                                                                  | setup_korean_font 등                       |
+| factor_zoo/              | 팩터 및 실험 결과 저장소 (pickle 파일)                                                          | 예: 20250708_084439_..._HYBRID.pkl         |
+| local_stock_data/        | 다운로드/캐싱된 주식 데이터                                                                    | cache/, processed/                         |
+| requirements.txt         | 의존성 패키지 목록                                                                              | -                                          |
+| PRD.md                   | 상세 요구사항/워크플로우 문서                                                                  | -                                          |
+| README.md                | 프로젝트 소개, 설치/실행법, 구조 설명                                                          | -                                          |
+
+---
+
+## 11. 폴더 구조 예시 및 설명
+
+```
+AlphaFactors/
+  ├─ app.py                  # 메인 웹앱
+  ├─ config.py               # 환경설정 dataclass
+  ├─ data_handler.py         # 데이터 다운로드/캐싱/전처리
+  ├─ alpha_factors.py        # 팩터 생성 엔진
+  ├─ models.py               # 딥러닝/머신러닝 팩터
+  ├─ portfolio_backtester.py # 백테스팅
+  ├─ qlib_handler.py         # Qlib 연동
+  ├─ utils.py                # 유틸리티/팩터 Zoo
+  ├─ font_config.py          # 한글 폰트 설정
+  ├─ factor_zoo/             # 팩터/실험 결과 저장 (pickle)
+  ├─ local_stock_data/       # 주식 데이터
+  │    ├─ cache/             # 원본 데이터 캐시
+  │    └─ processed/         # 전처리 데이터
+  ├─ requirements.txt
+  ├─ PRD.md
+  └─ README.md
+```
+
+---
+
+## 12. 주요 함수/클래스 간단 설명 (주니어 개발자 참고)
+
+- **AlphaForgeApp (app.py)**: 전체 UI/UX 및 워크플로우 관리
+- **DataHandler (data_handler.py)**: 데이터 다운로드/캐싱/전처리 담당
+- **AlphaFactorEngine (alpha_factors.py)**: 팩터 계산, IC/ICIR, 팩터 결합 등
+- **ModelTrainer (models.py)**: 딥러닝/머신러닝 팩터 학습/예측
+- **PortfolioBacktester (portfolio_backtester.py)**: Qlib 기반 백테스팅, 리스크 분석
+- **QlibHandler (qlib_handler.py)**: Qlib 연동, 데이터 변환, 백테스트 실행
+- **save_factor_to_zoo, load_factors_from_zoo (utils.py)**: 팩터 Zoo 저장/불러오기/삭제
+
+---
+
+## 13. 실수 방지 팁 & 자주 하는 실수
+
+- Python 3.7~3.8 환경 권장 (Qlib 호환성)
+- Qlib 데이터셋 경로, yfinance/FinanceDataReader API 키 확인
+- 팩터 계산 시 데이터 기간/인덱스 일치 여부 확인
+- Streamlit 실행 시 requirements.txt 패키지 모두 설치 필요
+- factor_zoo/ 및 local_stock_data/ 폴더 권한/경로 확인
+
+---
+
+## 14. 전체 워크플로우 요약 (표)
+
+| 단계         | 주요 파일/클래스         | 설명 및 주의사항                       |
+|--------------|--------------------------|----------------------------------------|
+| 데이터 준비  | data_handler.py          | 종목/기간 입력 → 데이터 다운로드/캐싱  |
+| 팩터 생성    | alpha_factors.py, models.py | 팩터 계산/딥러닝 팩터 학습             |
+| 팩터 저장    | utils.py, factor_zoo/    | 팩터 및 메타데이터 pickle로 저장        |
+| 백테스트     | portfolio_backtester.py, qlib_handler.py | Qlib 기반 백테스트/리스크 분석         |
+| 결과 분석    | utils.py, app.py         | 성과 요약, 시각화, 리포트               |
+| UI/UX        | app.py, font_config.py   | Streamlit UI, 한글 폰트 적용            |
