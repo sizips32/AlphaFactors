@@ -217,12 +217,13 @@ class AlphaForgeApp:
         
         st.header("2. 🎯 알파 팩터 생성")
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 통계/기술적 팩터", 
             "🧠 딥러닝 팩터", 
             "📝 공식 기반 팩터", 
             "🦁 팩터 Zoo", 
-            "⚡ 선형/비선형 비교"
+            "⚡ 선형/비선형 비교",
+            "🚀 메가-알파 백테스트"
         ])
         with tab1:
             self._render_statistical_factor_section()
@@ -234,6 +235,8 @@ class AlphaForgeApp:
             self._render_factor_zoo_section()
         with tab5:
             self._render_linear_vs_nonlinear_section()
+        with tab6:
+            self._render_mega_alpha_backtest_section()
         
         # 4. 설명 섹션
         self._render_explanation_section()
@@ -732,7 +735,7 @@ class AlphaForgeApp:
         )
         fixed_weights = {}
         if weight_mode == "고정 가중치 직접 입력" and len(factor_types) > 1:
-            fixed_weights = self.render_common_weight_inputs(factor_types, factor_names_ko, "statistical")
+            fixed_weights = render_fixed_weight_inputs(factor_types, factor_names_ko)
 
         # --- 팩터 생성 버튼 및 로직 ---
         if st.button("🚀 알파 팩터 생성", type="primary", key="statistical_generate"):
@@ -2024,7 +2027,7 @@ class AlphaForgeApp:
             combine_method = render_advanced_combine_method()
             advanced_options = render_advanced_options()
             if st.button("🔧 고급 공식 팩터 생성", type="primary"):
-                self._generate_formula_factors(formulas, {}, combine_method)
+                self._generate_formula_factors(formulas, advanced_options, combine_method)
 
     def _generate_formula_factors(self, formulas: Dict[str, str], params: Dict[str, Any], combine_method: str):
         """공식 기반 팩터 생성 실행 (가독성/설명 강화)"""
@@ -2447,6 +2450,467 @@ class AlphaForgeApp:
         running_max = cum_returns.expanding().max()
         drawdown = (cum_returns - running_max) / running_max
         return drawdown.min()
+
+    def _render_mega_alpha_backtest_section(self):
+        """
+        메가-알파 백테스트 섹션 렌더링
+        - 팩터 Zoo에서 선택한 팩터들로 포트폴리오 백테스트 실행
+        - Qlib 없이 순수 Python으로 구현된 백테스트 엔진 사용
+        """
+        st.header("🚀 메가-알파 백테스트")
+        
+        factors = load_factors_from_zoo()
+        if not factors:
+            st.info("팩터 Zoo에 저장된 팩터가 없습니다. 먼저 팩터를 생성/저장하세요!")
+            return
+        
+        st.info("**메가-알파 백테스트**: 팩터 Zoo의 여러 팩터를 조합하여 포트폴리오 백테스트를 실행합니다.")
+        
+        # 팩터 선택
+        st.subheader("📊 백테스트 팩터 선택")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            selected_factors = st.multiselect(
+                "백테스트에 사용할 팩터 선택",
+                list(factors.keys()),
+                default=list(factors.keys())[:3] if len(factors) >= 3 else list(factors.keys()),
+                help="최대 5개까지 선택 가능합니다"
+            )
+        
+        with col2:
+            if selected_factors:
+                st.markdown("**선택된 팩터 정보**")
+                for factor_name in selected_factors[:5]:  # 최대 5개만 표시
+                    meta = factors[factor_name].get('meta', {})
+                    factor_type = meta.get('weight_mode', 'Unknown')
+                    ic = meta.get('performance', {}).get('mean_ic', 0)
+                    st.write(f"• {factor_name[:30]}... : {factor_type} (IC: {ic:.3f})")
+        
+        if not selected_factors:
+            st.warning("백테스트할 팩터를 선택하세요.")
+            return
+        
+        # 백테스트 설정
+        st.subheader("⚙️ 백테스트 설정")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            portfolio_size = st.slider(
+                "포트폴리오 크기", 
+                min_value=3, max_value=10, value=5,
+                help="매 리밸런싱마다 선택할 종목 수"
+            )
+            
+            rebalance_freq = st.selectbox(
+                "리밸런싱 주기",
+                ["daily", "weekly", "monthly"],
+                index=1,
+                help="포트폴리오 재구성 주기"
+            )
+        
+        with col2:
+            transaction_cost = st.slider(
+                "거래비용 (%)", 
+                min_value=0.0, max_value=1.0, value=0.1, step=0.05,
+                help="매수/매도시 발생하는 거래비용"
+            )
+            
+            factor_combination = st.selectbox(
+                "팩터 결합 방식",
+                ["equal_weight", "ic_weight", "rank_ic_weight"],
+                format_func=lambda x: {
+                    "equal_weight": "동일 가중치",
+                    "ic_weight": "IC 가중치", 
+                    "rank_ic_weight": "Rank IC 가중치"
+                }[x],
+                help="여러 팩터 결합 방식"
+            )
+        
+        with col3:
+            benchmark_return = st.slider(
+                "벤치마크 연간 수익률 (%)",
+                min_value=0.0, max_value=20.0, value=8.0, step=0.5,
+                help="비교 기준이 되는 벤치마크 수익률"
+            ) / 100
+            
+            min_weight = st.slider(
+                "최소 종목 가중치 (%)",
+                min_value=1.0, max_value=20.0, value=5.0, step=1.0,
+                help="개별 종목의 최소 투자 비중"
+            ) / 100
+        
+        # 백테스트 실행
+        if st.button("🚀 메가-알파 백테스트 실행", type="primary"):
+            try:
+                with st.spinner("백테스트 실행 중... 시간이 오래 걸릴 수 있습니다."):
+                    
+                    # 팩터 데이터 결합
+                    st.info("1단계: 팩터 데이터 결합 중...")
+                    combined_factor_data = self._combine_factors_for_backtest(
+                        selected_factors, factors, factor_combination
+                    )
+                    
+                    if combined_factor_data.empty:
+                        st.error("팩터 데이터 결합에 실패했습니다.")
+                        return
+                    
+                    # 백테스트 실행
+                    st.info("2단계: 포트폴리오 백테스트 실행 중...")
+                    backtest_results = self._run_custom_backtest(
+                        combined_factor_data,
+                        portfolio_size=portfolio_size,
+                        rebalance_freq=rebalance_freq,
+                        transaction_cost=transaction_cost / 100,
+                        min_weight=min_weight
+                    )
+                    
+                    if not backtest_results:
+                        st.error("백테스트 실행에 실패했습니다.")
+                        return
+                    
+                    # 결과 저장
+                    st.session_state.mega_backtest_results = backtest_results
+                    st.session_state.mega_backtest_settings = {
+                        'selected_factors': selected_factors,
+                        'portfolio_size': portfolio_size,
+                        'rebalance_freq': rebalance_freq,
+                        'transaction_cost': transaction_cost,
+                        'factor_combination': factor_combination,
+                        'benchmark_return': benchmark_return
+                    }
+                    
+                    st.success("✅ 메가-알파 백테스트 완료!")
+                    
+            except Exception as e:
+                st.error(f"백테스트 실행 중 오류: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+        
+        # 백테스트 결과 표시
+        if 'mega_backtest_results' in st.session_state:
+            self._display_mega_backtest_results(
+                st.session_state.mega_backtest_results,
+                st.session_state.mega_backtest_settings
+            )
+
+    def _combine_factors_for_backtest(self, selected_factors: List[str], 
+                                    factors: Dict, combination_method: str) -> pd.DataFrame:
+        """백테스트용 팩터 데이터 결합"""
+        factor_dfs = []
+        
+        for factor_name in selected_factors:
+            factor_data = factors[factor_name]['factor']
+            if not factor_data.empty:
+                factor_dfs.append(factor_data)
+        
+        if not factor_dfs:
+            return pd.DataFrame()
+        
+        # 공통 날짜/종목 찾기
+        common_dates = factor_dfs[0].index
+        common_tickers = factor_dfs[0].columns
+        
+        for df in factor_dfs[1:]:
+            common_dates = common_dates.intersection(df.index)
+            common_tickers = common_tickers.intersection(df.columns)
+        
+        if len(common_dates) == 0 or len(common_tickers) == 0:
+            return pd.DataFrame()
+        
+        # 팩터 결합
+        if combination_method == "equal_weight":
+            # 동일 가중치
+            combined = pd.DataFrame(0, index=common_dates, columns=common_tickers)
+            for df in factor_dfs:
+                combined += df.loc[common_dates, common_tickers] / len(factor_dfs)
+        
+        elif combination_method == "ic_weight":
+            # IC 가중치 (메타 정보에서 IC 추출)
+            ic_weights = []
+            for factor_name in selected_factors:
+                meta = factors[factor_name].get('meta', {})
+                ic = meta.get('performance', {}).get('mean_ic', 0)
+                ic_weights.append(abs(ic))
+            
+            total_ic = sum(ic_weights)
+            if total_ic > 0:
+                ic_weights = [w / total_ic for w in ic_weights]
+            else:
+                ic_weights = [1 / len(ic_weights)] * len(ic_weights)
+            
+            combined = pd.DataFrame(0, index=common_dates, columns=common_tickers)
+            for i, df in enumerate(factor_dfs):
+                combined += df.loc[common_dates, common_tickers] * ic_weights[i]
+        
+        else:  # rank_ic_weight
+            # Rank IC 가중치 (단순화)
+            combined = pd.DataFrame(0, index=common_dates, columns=common_tickers)
+            for df in factor_dfs:
+                combined += df.loc[common_dates, common_tickers].rank(axis=1, pct=True) / len(factor_dfs)
+        
+        return combined
+
+    def _run_custom_backtest(self, factor_data: pd.DataFrame, portfolio_size: int = 5,
+                           rebalance_freq: str = "weekly", transaction_cost: float = 0.001,
+                           min_weight: float = 0.05) -> Dict:
+        """커스텀 백테스트 엔진 (Qlib 없이 구현)"""
+        
+        if factor_data.empty:
+            return {}
+        
+        universe_data = st.session_state.get('universe_data')
+        if universe_data is None:
+            st.error("유니버스 데이터가 없습니다.")
+            return {}
+        
+        # 공통 날짜/종목 찾기
+        common_dates = factor_data.index.intersection(universe_data.index)
+        common_tickers = factor_data.columns.intersection(universe_data.columns)
+        
+        if len(common_dates) < 10 or len(common_tickers) < portfolio_size:
+            st.error(f"충분한 데이터가 없습니다. (날짜: {len(common_dates)}, 종목: {len(common_tickers)})")
+            return {}
+        
+        # 데이터 정렬
+        factor_data = factor_data.loc[common_dates, common_tickers]
+        price_data = universe_data.loc[common_dates, common_tickers]
+        returns_data = price_data.pct_change().fillna(0)
+        
+        # 리밸런싱 날짜 생성
+        if rebalance_freq == "daily":
+            rebal_dates = common_dates
+        elif rebalance_freq == "weekly":
+            rebal_dates = common_dates[::5]  # 5일마다
+        else:  # monthly
+            rebal_dates = common_dates[::20]  # 20일마다
+        
+        # 백테스트 실행
+        portfolio_returns = []
+        portfolio_weights_history = []
+        turnover_history = []
+        current_weights = pd.Series(0, index=common_tickers)
+        
+        for i, date in enumerate(rebal_dates[:-1]):
+            if date not in factor_data.index:
+                continue
+            
+            # 팩터 기반 포트폴리오 구성
+            factor_scores = factor_data.loc[date].dropna()
+            if len(factor_scores) < portfolio_size:
+                continue
+            
+            # 상위 종목 선택
+            top_stocks = factor_scores.nlargest(portfolio_size).index
+            
+            # 가중치 계산 (팩터 점수 기반)
+            scores = factor_scores[top_stocks]
+            weights = scores / scores.sum()
+            
+            # 최소 가중치 제약
+            weights = weights.clip(lower=min_weight)
+            weights = weights / weights.sum()  # 정규화
+            
+            # 전체 포트폴리오 가중치
+            new_weights = pd.Series(0, index=common_tickers)
+            new_weights[top_stocks] = weights
+            
+            # 턴오버 계산
+            turnover = (new_weights - current_weights).abs().sum() / 2
+            turnover_history.append(turnover)
+            
+            # 거래비용 차감
+            trading_cost = turnover * transaction_cost
+            
+            # 다음 리밸런싱까지의 수익률 계산
+            next_date_idx = min(i + 1, len(rebal_dates) - 1)
+            period_dates = common_dates[
+                common_dates.get_loc(date):common_dates.get_loc(rebal_dates[next_date_idx])
+            ]
+            
+            for period_date in period_dates[1:]:  # 첫째 날 제외
+                if period_date in returns_data.index:
+                    daily_return = (new_weights * returns_data.loc[period_date]).sum()
+                    portfolio_returns.append(daily_return - trading_cost / len(period_dates))
+            
+            portfolio_weights_history.append(new_weights.to_dict())
+            current_weights = new_weights
+        
+        if not portfolio_returns:
+            return {}
+        
+        # 성과 지표 계산
+        portfolio_returns = pd.Series(portfolio_returns)
+        cumulative_returns = (1 + portfolio_returns).cumprod()
+        
+        total_return = cumulative_returns.iloc[-1] - 1
+        annualized_return = (1 + total_return) ** (252 / len(portfolio_returns)) - 1
+        volatility = portfolio_returns.std() * np.sqrt(252)
+        sharpe_ratio = annualized_return / volatility if volatility > 0 else 0
+        max_dd = self._calculate_max_drawdown(cumulative_returns)
+        
+        avg_turnover = np.mean(turnover_history) if turnover_history else 0
+        win_rate = (portfolio_returns > 0).mean()
+        
+        return {
+            'portfolio_returns': portfolio_returns,
+            'cumulative_returns': cumulative_returns,
+            'performance_metrics': {
+                'total_return': total_return,
+                'annualized_return': annualized_return,
+                'volatility': volatility,
+                'sharpe_ratio': sharpe_ratio,
+                'max_drawdown': max_dd,
+                'avg_turnover': avg_turnover,
+                'win_rate': win_rate
+            },
+            'weights_history': portfolio_weights_history,
+            'turnover_history': turnover_history
+        }
+
+    def _display_mega_backtest_results(self, results: Dict, settings: Dict):
+        """메가-알파 백테스트 결과 표시"""
+        st.markdown("---")
+        st.subheader("📊 메가-알파 백테스트 결과")
+        
+        metrics = results['performance_metrics']
+        
+        # 주요 성과 지표
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("총 수익률", f"{metrics['total_return']:.2%}")
+        with col2:
+            st.metric("연간 수익률", f"{metrics['annualized_return']:.2%}")
+        with col3:
+            st.metric("샤프 비율", f"{metrics['sharpe_ratio']:.3f}")
+        with col4:
+            st.metric("최대 손실폭", f"{metrics['max_drawdown']:.2%}")
+        
+        # 추가 지표
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("연간 변동성", f"{metrics['volatility']:.2%}")
+        with col2:
+            st.metric("승률", f"{metrics['win_rate']:.1%}")
+        with col3:
+            st.metric("평균 턴오버", f"{metrics['avg_turnover']:.2%}")
+        with col4:
+            calmar_ratio = metrics['annualized_return'] / abs(metrics['max_drawdown']) if metrics['max_drawdown'] != 0 else 0
+            st.metric("칼마 비율", f"{calmar_ratio:.3f}")
+        
+        # 누적 수익률 차트
+        st.subheader("📈 누적 수익률")
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        cum_returns = results['cumulative_returns']
+        cum_returns.plot(ax=ax, linewidth=2, color='darkgreen', label='메가-알파 포트폴리오')
+        
+        # 벤치마크 비교 (단순 복리)
+        benchmark_daily = settings['benchmark_return'] / 252
+        benchmark_cum = (1 + benchmark_daily) ** np.arange(len(cum_returns))
+        ax.plot(cum_returns.index, benchmark_cum, '--', color='red', alpha=0.7, label=f'벤치마크 ({settings["benchmark_return"]:.1%})')
+        
+        ax.set_title('메가-알파 포트폴리오 vs 벤치마크 누적 수익률', fontsize=14, fontweight='bold')
+        ax.set_ylabel('누적 수익률')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
+        
+        # 드로우다운 분석
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("📉 드로우다운 분석")
+            
+            running_max = cum_returns.expanding().max()
+            drawdown = (cum_returns - running_max) / running_max
+            
+            fig, ax = plt.subplots(figsize=(10, 5))
+            drawdown.plot(ax=ax, color='red', alpha=0.7)
+            ax.fill_between(drawdown.index, drawdown, 0, alpha=0.3, color='red')
+            ax.set_title('포트폴리오 드로우다운')
+            ax.set_ylabel('드로우다운 (%)')
+            ax.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+        
+        with col2:
+            st.subheader("📊 수익률 분포")
+            
+            returns = results['portfolio_returns']
+            
+            fig, ax = plt.subplots(figsize=(8, 5))
+            returns.hist(bins=30, ax=ax, alpha=0.7, color='steelblue')
+            ax.axvline(returns.mean(), color='red', linestyle='--', 
+                      label=f'평균: {returns.mean():.4f}')
+            ax.axvline(returns.quantile(0.05), color='orange', linestyle='--', 
+                      label=f'5% VaR: {returns.quantile(0.05):.4f}')
+            ax.set_xlabel('일별 수익률')
+            ax.set_ylabel('빈도')
+            ax.set_title('수익률 분포')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+        
+        # 설정 요약
+        with st.expander("🔧 백테스트 설정 요약", expanded=False):
+            st.write(f"**선택된 팩터**: {', '.join(settings['selected_factors'])}")
+            st.write(f"**포트폴리오 크기**: {settings['portfolio_size']}개 종목")
+            st.write(f"**리밸런싱 주기**: {settings['rebalance_freq']}")
+            st.write(f"**거래비용**: {settings['transaction_cost']:.2%}")
+            st.write(f"**팩터 결합 방식**: {settings['factor_combination']}")
+            st.write(f"**벤치마크 수익률**: {settings['benchmark_return']:.1%}")
+        
+        # 성과 해석
+        st.subheader("🎯 백테스트 결과 해석")
+        
+        # 성과 평가
+        if metrics['sharpe_ratio'] > 1.5:
+            performance_rating = "매우 우수"
+            color = "green"
+        elif metrics['sharpe_ratio'] > 1.0:
+            performance_rating = "우수"
+            color = "blue"
+        elif metrics['sharpe_ratio'] > 0.5:
+            performance_rating = "양호"
+            color = "orange"
+        else:
+            performance_rating = "부진"
+            color = "red"
+        
+        excess_return = metrics['annualized_return'] - settings['benchmark_return']
+        
+        st.markdown(f"""
+        **종합 평가**: :{color}[{performance_rating}]
+        
+        • **초과 수익**: 벤치마크 대비 {excess_return:.2%}의 {'초과 수익' if excess_return > 0 else '부족 수익'}을 달성했습니다.
+        • **위험 조정 수익**: {metrics['sharpe_ratio']:.2f}의 샤프 비율로 {'우수한' if metrics['sharpe_ratio'] > 1 else '보통의'} 위험 대비 수익률을 보였습니다.
+        • **안정성**: 최대 {abs(metrics['max_drawdown']):.1%}의 손실 구간을 경험했습니다.
+        • **일관성**: {metrics['win_rate']:.1%}의 승률과 {metrics['avg_turnover']:.1%}의 평균 턴오버를 기록했습니다.
+        """)
+        
+        # 개선 제안
+        if metrics['max_drawdown'] < -0.15:
+            st.warning("⚠️ 높은 최대 손실폭이 관찰됩니다. 리스크 관리 강화를 고려하세요.")
+        
+        if metrics['avg_turnover'] > 0.5:
+            st.warning("⚠️ 높은 턴오버가 관찰됩니다. 거래비용이 수익성에 영향을 줄 수 있습니다.")
+        
+        if metrics['sharpe_ratio'] < 0.5:
+            st.info("💡 샤프 비율 개선을 위해 다른 팩터 조합이나 포트폴리오 설정을 시도해보세요.")
 
 # 애플리케이션 실행
 if __name__ == "__main__":
